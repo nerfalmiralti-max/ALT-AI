@@ -1,0 +1,45 @@
+{
+  "name": "alt-quality-radar",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.19"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/unit/**/*.test.ts",
+    "test:scanner": "tsx tests/scanner/run-fixture-scan.ts && tsx tests/scanner/run-page-timeout-scan.ts && tsx tests/scanner/run-overall-timeout-scan.ts",
+    "test:e2e": "tsx tests/e2e/run.ts",
+    "scan": "tsx scripts/scan.ts"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@supabase/supabase-js": "^2.45.4",
+    "ipaddr.js": "^2.5.0",
+    "lighthouse": "^13.4.1",
+    "next": "15.5.21",
+    "pixelmatch": "^7.2.0",
+    "playwright": "^1.62.1",
+    "pngjs": "^7.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "server-only": "^0.0.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^20.16.11",
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "15.5.21",
+    "tsx": "^4.23.10",
+    "typescript": "^5.6.3"
+  }
+}

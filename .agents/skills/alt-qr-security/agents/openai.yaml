@@ -1,0 +1,4 @@
+interface:
+  display_name: "ALT QR Security"
+  short_description: "Scanner threat modeling and SSRF hardening"
+  default_prompt: "Use $alt-qr-security to audit and harden ALT QR scanner boundaries without weakening local development."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "ALT QR Auditor"
+  short_description: "Independent evidence-driven ALT QR review"
+  default_prompt: "Use $alt-qr-auditor to independently inspect ALT QR, report evidence-backed weaknesses, and verify fixes."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "ALT QR Product Design"
+  short_description: "Visual and interaction discipline for ALT QR"
+  default_prompt: "Use $alt-qr-product-design to refine the live ALT QR interface through three browser-verified design passes."

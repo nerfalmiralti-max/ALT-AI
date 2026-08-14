@@ -1,0 +1,9 @@
+{
+  "configurations": [
+    {
+      "name": "alt-qr-dev",
+      "runtimeExecutable": "npm.cmd",
+      "runtimeArgs": ["run", "dev"]
+    }
+  ]
+}
