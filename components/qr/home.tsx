@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import type { ProjectRecord, ScanRecord } from "@/lib/qr/types";
-import { BrandMark } from "./brand-mark";
+import { ArrowIcon, ChallengeIcon, DashboardIcon, ScanIcon } from "./icons";
 import { ScanForm } from "./scan-form";
 import { VerificationMark } from "./verification-mark";
 
@@ -20,22 +20,22 @@ export function Home({ scans, projects }: { scans: ScanRecord[]; projects: Proje
   const projectById = new Map(projects.map((project) => [project.id, project]));
   const recentUrls = [...new Set(scans.map((scan) => scan.normalizedUrl))].slice(0, 8);
   return (
-    <main className="app-shell home-shell">
-      <a className="skip-link" href="#scan-main">Skip to scanner</a>
-      <header className="topbar"><BrandMark /><div className="topbar-status"><VerificationMark state="idle" /><span>Scanner ready</span></div></header>
-
+    <main id="main-content" className="control-page home-shell">
       <section className="home-primary" id="scan-main" aria-labelledby="home-heading">
         <div className="home-copy">
-          <span className="product-label">Deterministic website QA</span>
+          <span className="product-label">Release control, backed by browser evidence</span>
           <h1 id="home-heading">Check a site before you ship.</h1>
-          <p>Scan page health, accessibility, search readiness, runtime failures, performance, and visual change—with evidence for every finding.</p>
+          <p>ALT QR turns real browser evidence into a release decision, a prioritized fix queue, and a comparison you can verify.</p>
         </div>
         <ScanForm recentUrls={recentUrls} />
+        <div className="home-actions"><Link className="secondary-action" href="/dashboard"><DashboardIcon />Open control room</Link><Link className="secondary-action" href="/challenge"><ChallengeIcon />Beat your stack</Link><Link className="text-action" href="/scan/new">Dedicated scan view<ArrowIcon /></Link></div>
         <div className="scan-assurances" aria-label="Scan behavior"><span><b>01</b> Same-origin crawl</span><span><b>02</b> Desktop & mobile</span><span><b>03</b> Traceable release gate</span></div>
       </section>
 
+      <section className="method-strip" aria-label="ALT QR workflow"><div><ScanIcon /><span>Collect</span><p>Bounded page, runtime, accessibility, performance, and visual evidence.</p></div><div><span className="method-index">02</span><span>Decide</span><p>Evaluate the project’s stored release-gate configuration.</p></div><div><span className="method-index">03</span><span>Act</span><p>Fix measured blockers, rescan, and compare against previous or baseline evidence.</p></div></section>
+
       <section className="recent-scans" aria-labelledby="recent-heading">
-        <div className="section-heading"><div><span>Recent activity</span><h2 id="recent-heading">Recent scans</h2><p>Open a report, review its baseline, or scan the same site again.</p></div><strong>{scans.length}</strong></div>
+        <div className="section-heading"><div><span>Real project data</span><h2 id="recent-heading">Recent release checks</h2><p>Open a stored report or move into the project control room.</p></div><Link className="text-action" href="/dashboard">View all projects<ArrowIcon /></Link></div>
         {scans.length ? <div className="recent-list">{scans.slice(0, 12).map((scan) => {
           const project = projectById.get(scan.projectId);
           const baseline = project?.baselineScanId === scan.id;
@@ -50,7 +50,6 @@ export function Home({ scans, projects }: { scans: ScanRecord[]; projects: Proje
           </Link>;
         })}</div> : <div className="empty-state"><VerificationMark state="idle" /><div><b>No scans yet</b><p>Enter a public website above to create the first quality report.</p></div></div>}
       </section>
-      <footer className="footer"><span>ALT Quality Radar</span><span>Deterministic · Local-first record</span></footer>
     </main>
   );
 }

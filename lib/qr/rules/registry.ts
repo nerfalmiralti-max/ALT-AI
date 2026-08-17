@@ -29,7 +29,7 @@ const rules = [
   ["console-error", "browser", "WARNING", "Browser console error", "Client-side code emitted an error while the page loaded.", "Resolve the underlying runtime error and add regression coverage.", 6, "PAGE"],
   ["console-warning", "browser", "NOTICE", "Browser console warning", "Client-side code emitted a warning while the page loaded.", "Review the warning, remove obsolete behavior, and deduplicate repeated messages.", 2, "PAGE"],
   ["page-error", "browser", "CRITICAL", "Unhandled page exception", "The browser observed an uncaught JavaScript exception.", "Fix the exception and verify the affected user flow.", 12, "PAGE"],
-  ["request-failure", "browser", "NOTICE", "Resource request failed", "A network resource did not complete successfully.", "Check the resource URL, response, CORS policy, and availability.", 3, "PAGE"],
+  ["request-failure", "browser", "NOTICE", "Resource request failed", "A network resource did not complete successfully.", "Check the resource URL, response, CORS policy, and availability.", 3, "SITE"],
   ["page-audit-partial", "browser", "WARNING", "Page audit is partial", "The page loaded, but one scanner inspection step did not complete.", "Review the recorded scanner evidence and retry after correcting the page or transient condition.", 4, "PAGE"],
   ["missing-csp", "infrastructure", "NOTICE", "Content Security Policy is missing", "The site has pages without a declared browser content policy.", "Introduce a tested Content-Security-Policy header.", 3, "SITE"],
   ["missing-hsts", "infrastructure", "NOTICE", "HSTS is missing", "The HTTPS site does not consistently instruct browsers to stay on HTTPS.", "Add Strict-Transport-Security after confirming complete HTTPS support.", 3, "SITE"],

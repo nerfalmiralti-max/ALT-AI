@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { IssueEvidence, IssueScope, LighthouseMetrics, NetworkFailure, PageAudit, ScanIssue } from "../types";
+import { coalesceNetworkFailures, filterStructuredNetworkConsoleDuplicates } from "../network";
 import { RULE_REGISTRY, type RuleId } from "./registry";
 
 function normalizedUrl(raw: string) {
@@ -140,18 +141,20 @@ export function evaluatePages(pages: PageAudit[], lighthouse: LighthouseMetrics)
         }));
       }
     }
-    const consoleEvents = page.consoleEvents?.length
+    const observedNetworkFailures: NetworkFailure[] = page.networkFailures?.length
+      ? page.networkFailures
+      : page.requestFailures.map((message) => ({ method: "GET", url: page.url, resourceType: "other" as const, reason: message, count: 1 }));
+    const networkFailures = coalesceNetworkFailures(observedNetworkFailures);
+    const observedConsoleEvents = page.consoleEvents?.length
       ? page.consoleEvents
       : page.consoleErrors.map((message) => ({ level: "error" as const, message, count: 1 }));
+    const consoleEvents = filterStructuredNetworkConsoleDuplicates(observedConsoleEvents, networkFailures);
     for (const event of consoleEvents) {
       issues.push(issue(event.level === "warning" ? "console-warning" : "console-error", page, { occurrences: event.count, evidence: { consoleMessage: event.message, excerpt: event.message.slice(0, 300), value: event.count } }));
     }
     for (const message of page.pageErrors) {
       issues.push(issue("page-error", page, { evidence: { consoleMessage: message, excerpt: message.slice(0, 300) } }));
     }
-    const networkFailures: NetworkFailure[] = page.networkFailures?.length
-      ? page.networkFailures
-      : page.requestFailures.map((message) => ({ method: "GET", url: page.url, resourceType: "other" as const, reason: message, count: 1 }));
     for (const failure of networkFailures) {
       const duplicatesPageStatus = failure.resourceType === "document"
         && failure.url === page.url

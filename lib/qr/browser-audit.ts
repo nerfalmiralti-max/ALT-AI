@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 
 import AxeBuilder from "@axe-core/playwright";
 import { chromium, type Browser, type BrowserContext, type Page, type Response } from "playwright";
@@ -8,8 +8,9 @@ import { PNG } from "pngjs";
 import { DESKTOP_VIEWPORT, MOBILE_VIEWPORT, scannerConfig } from "./config";
 import { comparePngBuffers } from "./diff";
 import { runLighthouseAudit } from "./lighthouse";
+import { coalesceNetworkFailures, filterStructuredNetworkConsoleDuplicates } from "./network";
 import { isAllowedByRobots, loadRobotsPolicy } from "./robots";
-import { installSafeBrowserRouting } from "./safe-request";
+import { installSafeBrowserRouting, PASSIVE_CHROMIUM_ARGS, ScanResourceBudget } from "./safe-request";
 import { sanitizeDiagnosticText } from "./sanitize";
 import { assertSafeTarget, TargetUrlError } from "./security";
 import { getAssetDirectory, resolveAssetPath } from "./store";
@@ -107,6 +108,7 @@ function documentInspectionFailed(page: PageAudit) {
 async function inspectPage(page: Page, url: string, signal?: AbortSignal, allowedOrigin?: string): Promise<PageAudit> {
   const consoleByKey = new Map<string, ConsoleEvent>();
   const networkByKey = new Map<string, NetworkFailure>();
+  const policyLimitedUrls = new Set<string>();
   const pageErrors: string[] = [];
   const auditFailures: PageAudit["auditFailures"] = [];
   const eventLimits = { consoleDropped: 0, networkDropped: 0, dialogsDismissed: 0, popupsBlocked: 0, downloadsBlocked: 0 };
@@ -154,6 +156,14 @@ async function inspectPage(page: Page, url: string, signal?: AbortSignal, allowe
   });
   page.on("response", (response) => {
     const request = response.request();
+    const policyBlock = response.headers()["x-alt-qr-policy-block"];
+    if (policyBlock) {
+      policyLimitedUrls.add(request.url());
+      if (auditFailures.filter((entry) => entry.system === "network-policy").length < 10) {
+        auditFailures.push({ system: "network-policy", message: `ALT QR limited a ${request.method()} ${normalizeResourceType(request.resourceType())} request under scanner policy (${conciseText(policyBlock)}).` });
+      }
+      return;
+    }
     if (response.status() >= 400) {
       if (networkObserved >= scannerConfig.maxNetworkFailures) {
         eventLimits.networkDropped += 1;
@@ -264,6 +274,24 @@ async function inspectPage(page: Page, url: string, signal?: AbortSignal, allowe
           return { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
         }
         var maxEvidence = ${scannerConfig.maxDomEvidenceItems};
+        var maxDomNodes = ${scannerConfig.maxDomNodes};
+        var maxRenderedChars = ${scannerConfig.maxRenderedDomChars};
+        var allElements = document.getElementsByTagName('*');
+        if (allElements.length > maxDomNodes) throw new Error('ALT_QR_DOM_NODE_LIMIT');
+        var renderedChars = 0;
+        for (var elementIndex = 0; elementIndex < allElements.length; elementIndex += 1) {
+          var measuredElement = allElements[elementIndex];
+          renderedChars += measuredElement.tagName.length + 5;
+          for (var attribute of measuredElement.attributes) {
+            renderedChars += attribute.name.length + attribute.value.length + 4;
+            if (renderedChars > maxRenderedChars) throw new Error('ALT_QR_DOM_TEXT_LIMIT');
+          }
+        }
+        var textWalker = document.createTreeWalker(document, NodeFilter.SHOW_TEXT);
+        while (textWalker.nextNode()) {
+          renderedChars += (textWalker.currentNode.nodeValue || '').length;
+          if (renderedChars > maxRenderedChars) throw new Error('ALT_QR_DOM_TEXT_LIMIT');
+        }
         var controls = Array.from(document.querySelectorAll('input:not([type=hidden]), select, textarea, button')).slice(0, maxEvidence);
         var unlabeledControls = controls.filter(function (control) {
           var labels = 'labels' in control && control.labels ? control.labels.length : 0;
@@ -274,7 +302,7 @@ async function inspectPage(page: Page, url: string, signal?: AbortSignal, allowe
         var canonical = document.querySelector('link[rel="canonical"]');
         var viewportWidth = document.documentElement.clientWidth;
         var widestElement;
-        for (var element of Array.from(document.body ? document.body.querySelectorAll('*') : [])) {
+        for (var element of allElements) {
           var rect = element.getBoundingClientRect();
           if (rect.right <= viewportWidth + 2 && rect.width <= viewportWidth + 2) continue;
           if (!widestElement || rect.right > widestElement.right) widestElement = { selector: selectorFor(element), width: Math.round(rect.width), right: rect.right, boundingBox: boxFor(element) };
@@ -311,15 +339,17 @@ async function inspectPage(page: Page, url: string, signal?: AbortSignal, allowe
           widestElement: widestElement ? { selector: widestElement.selector, width: widestElement.width, boundingBox: widestElement.boundingBox } : undefined,
           documentWidth: document.documentElement.scrollWidth,
           viewportWidth: viewportWidth,
-          htmlBytes: new TextEncoder().encode(document.documentElement.outerHTML).length
+          htmlBytes: renderedChars
         };
       })()`);
-      if (facts.htmlBytes > scannerConfig.maxResponseBytes) failure = { code: "RESPONSE_TOO_LARGE", message: "The rendered document exceeds the configured response-size limit." };
     } catch (error) {
       throwIfCancelled(signal);
-      const message = conciseText(`DOM inspection failed — ${error instanceof Error ? error.message : "unknown error"}`);
-      pageErrors.push(message);
-      failure ??= { code: "DOM_INSPECTION_FAILED", message };
+      const limitExceeded = error instanceof Error && /ALT_QR_DOM_(?:NODE|TEXT)_LIMIT/.test(error.message);
+      const message = limitExceeded
+        ? "The rendered document exceeded the bounded DOM inspection budget."
+        : "DOM inspection did not complete; this page has partial scanner evidence.";
+      auditFailures.push({ system: "dom", message });
+      failure ??= { code: limitExceeded ? "DOM_LIMIT_EXCEEDED" : "DOM_INSPECTION_FAILED", message };
     }
   }
 
@@ -342,8 +372,9 @@ async function inspectPage(page: Page, url: string, signal?: AbortSignal, allowe
     }
   }
 
-  const consoleEvents = [...consoleByKey.values()];
-  const networkFailures = [...networkByKey.values()];
+  const networkFailures = coalesceNetworkFailures([...networkByKey.values()]);
+  const policySuppressions: NetworkFailure[] = [...policyLimitedUrls].map((limitedUrl) => ({ method: "GET", url: limitedUrl, resourceType: "other", reason: "Scanner policy", count: 1 }));
+  const consoleEvents = filterStructuredNetworkConsoleDuplicates([...consoleByKey.values()], [...networkFailures, ...policySuppressions]);
   return {
     id: randomUUID(),
     // Chromium replaces a failed navigation with chrome-error://chromewebdata/.
@@ -392,6 +423,10 @@ async function captureScreenshot(page: Page, scanId: string, pageId: string, nam
     animations: "disabled",
     scale: "css",
   });
+  if (buffer.byteLength > scannerConfig.maxScreenshotBytes) {
+    await rm(absolutePath, { force: true }).catch(() => undefined);
+    throw new Error("Screenshot exceeds the encoded evidence byte budget.");
+  }
   const png = PNG.sync.read(buffer);
   return { id: randomUUID(), pageId, viewport, relativePath, width: png.width, height: png.height } satisfies ScreenshotAsset;
 }
@@ -400,9 +435,11 @@ export async function runBrowserAudit(input: {
   scanId: string;
   url: string;
   references: ComparisonReference[];
+  maxPages?: number;
   signal?: AbortSignal;
   onProgress: Progress;
 }): Promise<BrowserAuditResult> {
+  const maxPages = Math.max(1, Math.min(scannerConfig.maxPages, input.maxPages ?? scannerConfig.maxPages));
   const auditStarted = performance.now();
   let screenshotMs = 0;
   let browser: Browser | undefined;
@@ -412,6 +449,7 @@ export async function runBrowserAudit(input: {
   let timedOut = false;
   const deadline = new AbortController();
   const runSignal = input.signal ? AbortSignal.any([input.signal, deadline.signal]) : deadline.signal;
+  const resourceBudget = new ScanResourceBudget(scannerConfig.maxScanResponseBytes, scannerConfig.maxInflightRequests);
   const pages: PageAudit[] = [];
   const screenshots: ScreenshotAsset[] = [];
   const visualComparisons: VisualComparison[] = [];
@@ -430,7 +468,7 @@ export async function runBrowserAudit(input: {
       deadline.abort();
       void browser?.close();
     }, scannerConfig.scanTimeoutMs);
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, args: [...PASSIVE_CHROMIUM_ARGS] });
     throwIfCancelled(runSignal);
     desktop = await browser.newContext({
       viewport: { width: DESKTOP_VIEWPORT.width, height: DESKTOP_VIEWPORT.height },
@@ -440,10 +478,10 @@ export async function runBrowserAudit(input: {
       serviceWorkers: "block",
       reducedMotion: "reduce",
     });
-    const desktopRouting = await installSafeBrowserRouting(desktop, runSignal);
+    const desktopRouting = await installSafeBrowserRouting(desktop, runSignal, resourceBudget);
     const target = new URL(input.url);
     await input.onProgress("DISCOVERING", "Reading robots policy and primary document", 0, null, input.url);
-    let policy = await loadRobotsPolicy(target, runSignal);
+    let policy = await loadRobotsPolicy(target, runSignal, resourceBudget);
     throwIfCancelled(runSignal);
     if (!isAllowedByRobots(input.url, policy)) throw new TargetUrlError("ROBOTS_DISALLOWED", "The target is disallowed by robots.txt.");
     const primaryPage = await desktop.newPage();
@@ -461,7 +499,7 @@ export async function runBrowserAudit(input: {
     const crawlOrigin = new URL(primary.url || input.url).origin;
     desktopRouting.setDocumentOrigin(crawlOrigin);
     if (crawlOrigin !== policy.origin) {
-      policy = await loadRobotsPolicy(new URL(crawlOrigin), runSignal);
+      policy = await loadRobotsPolicy(new URL(crawlOrigin), runSignal, resourceBudget);
       if (!isAllowedByRobots(primary.url, policy)) throw new TargetUrlError("ROBOTS_DISALLOWED", "The redirected target is disallowed by robots.txt.");
     }
     const targets = [normalizeUrl(primary.url || input.url)];
@@ -485,7 +523,7 @@ export async function runBrowserAudit(input: {
         discovered.add(candidate);
         pathQueryCounts.set(candidatePath, variantCount + 1);
         if (!isAllowedByRobots(candidate, policy)) { robotsExcluded += 1; continue; }
-        if (targets.length < scannerConfig.maxPages) targets.push(candidate);
+        if (targets.length < maxPages) targets.push(candidate);
         else { skippedByLimit += 1; if (unverifiedUrls.length < 10) unverifiedUrls.push(candidate); }
       }
     };
@@ -495,7 +533,7 @@ export async function runBrowserAudit(input: {
     skippedCount = skippedByLimit;
     robotsExcludedCount = robotsExcluded;
     unverified = [...unverifiedUrls];
-    await input.onProgress("INSPECTING", `Inspecting up to ${scannerConfig.maxPages} safe same-origin pages`, 1, targets.length, input.url);
+    await input.onProgress("INSPECTING", `Inspecting up to ${maxPages} safe same-origin pages`, 1, targets.length, input.url);
     for (let cursor = 1; cursor < targets.length; cursor += scannerConfig.crawlConcurrency) {
       throwIfCancelled(runSignal);
       const batch = targets.slice(cursor, cursor + scannerConfig.crawlConcurrency);
@@ -521,7 +559,7 @@ export async function runBrowserAudit(input: {
     }
     throwIfCancelled(runSignal);
     await input.onProgress("AUDITING", "Axe evidence collected per page; running Lighthouse", 1, 2);
-    lighthouse = await runLighthouseAudit(input.url, runSignal);
+    lighthouse = await runLighthouseAudit(input.url, runSignal, resourceBudget);
     throwIfCancelled(runSignal);
     await input.onProgress("AUDITING", lighthouse.available ? "Accessibility and Lighthouse audits complete" : "axe complete; Lighthouse unavailable", 2, 2);
     await input.onProgress("CAPTURING", "Stabilizing layouts and capturing desktop/mobile evidence", 0, pages.length + 2);
@@ -542,7 +580,7 @@ export async function runBrowserAudit(input: {
       serviceWorkers: "block",
       reducedMotion: "reduce",
     });
-    const mobileRouting = await installSafeBrowserRouting(mobile, runSignal);
+    const mobileRouting = await installSafeBrowserRouting(mobile, runSignal, resourceBudget);
     mobileRouting.setDocumentOrigin(crawlOrigin);
     const mobilePage = await mobile.newPage();
     try {
@@ -597,6 +635,7 @@ export async function runBrowserAudit(input: {
           const baseline = await readFile(resolveAssetPath(baselineAsset.relativePath));
           const current = await readFile(resolveAssetPath(currentAsset.relativePath));
           const comparison = comparePngBuffers(baseline, current);
+          if (comparison.png.byteLength > scannerConfig.maxScreenshotBytes) throw new Error("Visual diff exceeds the encoded evidence byte budget.");
           const relativePath = `${input.scanId}/${reference.target}-${viewport}-diff.png`;
           await writeFile(resolveAssetPath(relativePath), comparison.png);
           const diffAsset: ScreenshotAsset = {

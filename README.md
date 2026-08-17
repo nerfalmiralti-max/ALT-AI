@@ -18,9 +18,28 @@ ALT QR is a deterministic, local-first website release scanner. It uses real Chr
 
 The original V1 browser, crawl, evidence, scoring, screenshots, local records, and optional Supabase mirror remain intact.
 
+## Beat Your Stack Challenge
+
+`/challenge` compares a known-good production URL with a candidate release through the same bounded scanner used by normal ALT QR reports. A Challenge separates existing findings, fixes, candidate-only changes, and unverified differences. Supported candidate-only findings qualify only when the equivalent production route was inspected, evidence exists, and a fresh candidate scan reproduces the finding.
+
+Challenge verdicts are deliberately narrow:
+
+- `ALT_QR_WON`: submitted QA verdict was Passed and ALT QR confirmed at least one qualifying regression.
+- `RELEASE_HAS_REGRESSIONS`: qualifying regressions were confirmed, but the submitted QA verdict was not Passed.
+- `NO_QUALIFYING_MISS`: complete evidence produced no confirmed qualifying regression.
+- `INSUFFICIENT_EVIDENCE`: a critical baseline, candidate, verification, or comparison boundary was incomplete.
+
+Reruns append new scan references and evidence; earlier runs are never overwritten. Challenge records are canonical local JSON under `.alt-qr-data/challenges/`. Phase 1 reports are local/authenticated-deployment views, not public signed links. See `docs/reliability/beat-your-stack-phase-1.md` for the exact claim boundary.
+
+### Adversarial QA Engine — Phase 2
+
+Every new Challenge run now preserves the Phase 1 production/candidate comparison and adds six isolated deterministic QA roles: Explorer, Breaker, Network, State, Responsive, and Runtime. Their raw observations are normalized only after all roles finish. An Evidence Judge then classifies each observation as confirmed, rejected, duplicate, baseline, unverified, or environmental.
+
+A primary `READY` is preliminary. ALT QR performs a bounded Red Team pass on an uncovered, same-origin, non-destructive route; a freshly reproduced release blocker revokes `READY`, while a clean completed pass produces an adversarially verified `READY`. A failed or incomplete role, scan, Judge, or Red Team stage can never silently become ready. Phase 2 remains deterministic and does not call an LLM. See `docs/reliability/adversarial-qa-phase-2.md` for the role boundaries, verdict flow, evidence policy, and test scenarios.
+
 ## Local setup
 
-Requirements: Node.js 22.19 or newer.
+Requirements: Node.js 22.19 or newer within the Node.js 22 release line.
 
 ```powershell
 npm install
@@ -83,12 +102,16 @@ npm run typecheck
 npm run lint
 npm test
 npm run test:scanner
+npm run test:reliability:smoke
+npm run test:reliability
 npm run test:e2e
 npm run build
 ```
 
-`test:scanner` performs scan A, sets it as baseline, mutates the fixture, performs scan B, and proves fixed/new/regression classifications, visual change, gate/verdict output, partial failure resilience, and cancellation. The E2E test drives the V2 report, baseline, rescan, diff, mobile layout, and print stylesheet.
+`test:scanner` performs scan A, sets it as baseline, mutates the fixture, performs scan B, and proves fixed/new/regression classifications, visual change, gate/verdict output, partial failure resilience, cancellation, and all four Challenge outcomes through real scanner runs. The E2E tests drive the V2 report plus the complete Challenge win, fixed rerun, insufficient-evidence, responsive, accessibility, and report flows.
+
+`test:reliability:smoke` runs the clean, document, and runtime profiles through the production worker on every fast validation pass. `test:reliability` runs all 47 Scanner Reliability v1 scenarios and repeats the clean and navigation profiles five times. It measures precision, recall, severity and verdict accuracy, evidence completeness, and semantic determinism while reporting Lighthouse/duration observations separately as environmental signals. Generated scan records and the latest machine report stay under ignored `.alt-qr-data/reliability/`; the versioned before/after reports live in `docs/reliability/`.
 
 ## Deployment boundary
 
-V2 still launches scans inside a persistent local Next.js Node process. A multi-instance or serverless deployment needs a durable external queue, a dedicated Chromium worker, shared object storage, and a canonical database adapter. Do not deploy the in-process launcher as if it were durable.
+V2 still launches scans inside a persistent local Next.js Node process. Vercel can build and serve the interface, but its serverless runtime is not a valid home for the current durable Chromium/Lighthouse worker. A multi-instance or serverless deployment needs a durable external queue, a dedicated Chromium worker, shared object storage, and a canonical database adapter. Use the checked-in Docker/Railway persistent-worker path for the current architecture. See `docs/deployment/vercel-runtime.md`.

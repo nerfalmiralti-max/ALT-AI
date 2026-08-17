@@ -8,6 +8,14 @@ async function expectNoAxeViolations(page: Page) {
   expect(result.violations, result.violations.map((item) => `${item.id}: ${item.help}`).join("\n")).toEqual([]);
 }
 
+async function expectResponsiveNoOverflow(page: Page, surface: string, widths = [390, 768, 1440]) {
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: width < 600 ? 844 : 900 });
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, `${width}px ${surface} viewport should not overflow horizontally`).toBeLessThanOrEqual(1);
+  }
+}
+
 test("home normalizes a bare domain before creating a scan", async ({ page }) => {
   test.skip(persistencePhase);
   let submittedUrl = "";
@@ -17,6 +25,7 @@ test("home normalizes a bare domain before creating a scan", async ({ page }) =>
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ scanId: "00000000-0000-4000-8000-000000000000" }) });
   });
   await page.goto("/");
+  await expect(page.locator('link[rel~="icon"]')).toHaveAttribute("href", /icon\.svg/);
   await page.getByLabel("Website URL").fill("example.com");
   await page.getByRole("button", { name: "Scan website" }).click();
   await expect.poll(() => submittedUrl).toBe("https://example.com");
@@ -32,9 +41,9 @@ test("scan, inspect, compare, cancel, and print the rescued report", async ({ pa
     expect(overflow, `${width}px home viewport should not overflow horizontally`).toBeLessThanOrEqual(1);
   }
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("link", { name: "Skip to scanner" })).toBeFocused();
+  await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/#scan-main$/);
+  await expect(page).toHaveURL(/#main-content$/);
   await expectNoAxeViolations(page);
 
   await page.getByLabel("Website URL").fill("http://127.0.0.1:4173/");
@@ -43,7 +52,7 @@ test("scan, inspect, compare, cancel, and print the rescued report", async ({ pa
   await expect(page.getByText("Current stage", { exact: true })).toBeVisible();
   await expect(page.getByText("Elapsed", { exact: true })).toBeVisible();
   await expect(page.getByText("Current page", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /release gate check/i })).toBeVisible({ timeout: 120_000 });
+  await expect(page.locator("#overview")).toBeVisible({ timeout: 120_000 });
   await expect(page.getByText("Quality score", { exact: true })).toBeVisible();
   await expect(page.getByText("Release gate", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Fix these first" })).toBeVisible();
@@ -108,7 +117,7 @@ test("scan, inspect, compare, cancel, and print the rescued report", async ({ pa
   await page.request.post("http://127.0.0.1:4173/__variant?value=B");
   await page.getByRole("button", { name: "Rescan" }).click();
   await expect(page).not.toHaveURL(firstReportUrl);
-  await expect(page.getByRole("heading", { name: /release gate check/i })).toBeVisible({ timeout: 120_000 });
+  await expect(page.locator("#overview")).toBeVisible({ timeout: 120_000 });
 
   await expect(page.getByRole("heading", { name: "What changed" })).toBeVisible();
   await expect(page.locator(".change-summary").getByText("Fixed", { exact: true })).toBeVisible();
@@ -129,7 +138,16 @@ test("scan, inspect, compare, cancel, and print the rescued report", async ({ pa
   await page.getByRole("button", { name: "All issues" }).click();
   await expect(page.getByLabel("Category")).toHaveValue("all");
   await page.getByRole("link", { name: "Compare", exact: true }).click();
-  await expect(page).toHaveURL(/#changed$/);
+  await expect(page).toHaveURL(/\/scan\/[0-9a-f-]+\/compare/);
+  await expect(page.getByRole("heading", { name: "What changed before release" })).toBeVisible();
+  await expect(page.getByText("Fixed", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Regressions", { exact: true }).first()).toBeVisible();
+  await expectResponsiveNoOverflow(page, "comparison");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoAxeViolations(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goBack();
+  await expect(page.getByText("Quality score", { exact: true })).toBeVisible();
   const secondVisual = page.locator("#visual");
   await secondVisual.getByRole("button", { name: "Mobile" }).click();
   await expect(secondVisual.getByRole("button", { name: "Baseline", exact: true })).toBeEnabled();
@@ -143,10 +161,33 @@ test("scan, inspect, compare, cancel, and print the rescued report", async ({ pa
   expect((await page.request.get(exportHref!)).status()).toBe(200);
 
   const reportBeforeGateEdit = page.url().replace(/#.*$/, "");
-  await page.getByText("Release gate settings", { exact: true }).click();
-  await page.getByLabel("Minimum score").fill("79");
-  await page.getByRole("button", { name: "Save gate" }).click();
+  await page.goto("/dashboard");
+  await expect(page.getByRole("heading", { name: "Control room" })).toBeVisible();
+  await expect(page.locator(".project-row").first()).toBeVisible();
+  await expectResponsiveNoOverflow(page, "dashboard");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoAxeViolations(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator(".project-row .row-actions a").first().click();
+  await expect(page.getByRole("heading", { name: "What needs attention" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Project scans" })).toBeVisible();
+  await expectResponsiveNoOverflow(page, "project overview");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoAxeViolations(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(reportBeforeGateEdit);
+  await expect(page.getByText("Quality score", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Gate", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Release gate", exact: true })).toBeVisible();
+  await expectResponsiveNoOverflow(page, "project settings");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoAxeViolations(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByLabel("Minimum quality score").fill("79");
+  await page.getByRole("button", { name: "Save release gate" }).click();
   await expect(page.getByRole("status")).toContainText("Release gate updated");
+  await page.goBack();
+  await expect(page.getByText("Quality score", { exact: true })).toBeVisible();
   expect(page.url().replace(/#.*$/, "")).toBe(reportBeforeGateEdit);
   const historical = page.locator(".scan-history a").last();
   await historical.click();
@@ -198,6 +239,7 @@ test("persisted report, baseline, history, issues, metrics, and screenshots surv
   await page.getByRole("link", { name: "Visual", exact: true }).click();
   await expect(page.locator("#visual").getByRole("img", { name: /current.*desktop screenshot/i })).toBeVisible();
   await expect(page.locator(".performance-grid").first()).toBeVisible();
-  await page.getByRole("link", { name: "New scan" }).click();
-  await expect(page.getByRole("heading", { name: "Check a site before you ship." })).toBeVisible();
+  await page.getByRole("link", { name: "Start scan" }).click();
+  await expect(page.getByRole("heading", { name: "Inspect a website before it ships." })).toBeVisible();
+  await expectResponsiveNoOverflow(page, "new scan");
 });

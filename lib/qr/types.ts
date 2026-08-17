@@ -119,7 +119,7 @@ export type PageAudit = {
   requestFailures: string[];
   networkFailures: NetworkFailure[];
   axeViolations: AxeViolation[];
-  auditFailures: { system: "axe" | "screenshot" | "mobile" | "visual" | "timeout"; message: string }[];
+  auditFailures: { system: "axe" | "dom" | "network-policy" | "screenshot" | "mobile" | "visual" | "timeout"; message: string }[];
   eventLimits: { consoleDropped: number; networkDropped: number; dialogsDismissed: number; popupsBlocked: number; downloadsBlocked: number };
   failure?: { code: string; message: string };
 };
@@ -319,14 +319,21 @@ export type ScanConfigSnapshot = {
   maxRedirects: number;
   maxResponseBytes: number;
   maxResourceBytes: number;
+  maxScanResponseBytes: number;
+  maxInflightRequests: number;
+  maxDomNodes: number;
+  maxRenderedDomChars: number;
   maxScreenshotPixels: number;
   maxScreenshotHeight: number;
+  maxScreenshotBytes: number;
   maxLinksPerPage: number;
   maxConsoleEvents: number;
   maxNetworkFailures: number;
   maxRequestsPerContext: number;
   maxDialogs: number;
   maxPopups: number;
+  maxStoredScans: number;
+  maxStoredBytes: number;
   desktopViewport: { width: number; height: number; deviceScaleFactor: number };
   mobileViewport: { width: number; height: number; deviceScaleFactor: number };
 };
@@ -371,6 +378,11 @@ export type ScanRecord = {
   configSnapshot: ScanConfigSnapshot;
   analysisProjectUpdatedAt?: string;
   persistence?: { backend: "local" | "supabase"; synchronized: boolean; warning?: string };
+  challengeContext?: {
+    challengeId: string;
+    runId: string;
+    role: "PRODUCTION" | "CANDIDATE" | "VERIFICATION" | "RED_TEAM_PRODUCTION" | "RED_TEAM_CANDIDATE" | "RED_TEAM_VERIFICATION";
+  };
 };
 
 export type ProjectRecord = {
@@ -384,6 +396,274 @@ export type ProjectRecord = {
   scanIds: string[];
   gateConfig: ReleaseGateConfig;
   ignoredFingerprints: string[];
+  hidden?: boolean;
 };
 
 export type ProjectIndex = { projects: ProjectRecord[] };
+
+export const CHALLENGE_STAGES = [
+  "QUEUED",
+  "PREPARING_BASELINE",
+  "SCANNING_PRODUCTION",
+  "SCANNING_CANDIDATE",
+  "COMPARING",
+  "VERIFYING",
+  "BUILDING_EVIDENCE",
+  "FINALIZING",
+  "COMPLETE",
+  "CANCELLED",
+  "FAILED",
+] as const;
+
+export type ChallengeStage = (typeof CHALLENGE_STAGES)[number];
+export type ExistingQaVerdict = "PASSED" | "FAILED" | "UNKNOWN";
+export type ChallengeVerdict = "ALT_QR_WON" | "RELEASE_HAS_REGRESSIONS" | "NO_QUALIFYING_MISS" | "INSUFFICIENT_EVIDENCE";
+export type ChallengeFindingClassification = "NEW_REGRESSION" | "EXISTING" | "FIXED" | "UNVERIFIED";
+export type ChallengeConfidence = "CONFIRMED" | "UNVERIFIED";
+
+export const QA_ROLES = ["EXPLORER", "BREAKER", "NETWORK", "STATE", "RESPONSIVE", "RUNTIME"] as const;
+export type QaRole = (typeof QA_ROLES)[number];
+export type QaFindingSource = "PRIMARY" | "RED_TEAM";
+export type QaRoleStatus = "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "TIMED_OUT" | "CANCELLED";
+export type SwarmStage = "PENDING" | "PREPARING" | "RUNNING_ROLES" | "NORMALIZING" | "JUDGING" | "REPRODUCING" | "PRELIMINARY_VERDICT" | "RED_TEAM" | "FINALIZING" | "COMPLETE" | "FAILED" | "CANCELLED";
+export type JudgeDisposition = "CONFIRMED" | "REJECTED" | "DUPLICATE" | "BASELINE_ISSUE" | "UNVERIFIED" | "ENVIRONMENTAL";
+export type PreliminaryVerdict = "PRELIMINARY_READY" | "PRELIMINARY_HOLD" | "PRELIMINARY_INCOMPLETE";
+export type RedTeamStatus = "NOT_STARTED" | "RUNNING" | "CLEAR" | "BLOCKER_FOUND" | "SKIPPED_HOLD" | "SKIPPED_INCOMPLETE" | "FAILED" | "CANCELLED";
+export type FinalVerificationVerdict = "READY" | "HOLD" | "INCOMPLETE";
+
+export type RawSwarmFinding = {
+  id: string;
+  role: QaRole | "RED_TEAM";
+  runId: string;
+  source: QaFindingSource;
+  issueIdentity: string;
+  ruleId: string;
+  category: IssueCategory;
+  severity: IssueSeverity;
+  title: string;
+  route: string;
+  interaction?: string;
+  observedBehavior: string;
+  evidence: ChallengeEvidence;
+  discoveredAt: string;
+  initialConfidence: "OBSERVED" | "TENTATIVE";
+  reproductionStatus: "PENDING" | "REPRODUCED" | "NOT_REPRODUCED" | "NOT_ATTEMPTED";
+};
+
+export type QaRoleRun = {
+  role: QaRole;
+  mission: string;
+  status: QaRoleStatus;
+  startedAt?: string;
+  completedAt?: string;
+  durationMs: number;
+  actionCount: number;
+  findings: RawSwarmFinding[];
+  failure?: { code: string; message: string };
+};
+
+export type NormalizedSwarmFinding = {
+  id: string;
+  normalizationKey: string;
+  canonicalRawFindingId: string;
+  rawFindingIds: string[];
+  roles: (QaRole | "RED_TEAM")[];
+  source: QaFindingSource;
+  ruleId: string;
+  category: IssueCategory;
+  severity: IssueSeverity;
+  title: string;
+  route: string;
+  interaction?: string;
+  evidence: ChallengeEvidence[];
+};
+
+export type JudgeDecision = {
+  id: string;
+  rawFindingId: string;
+  normalizedFindingId: string;
+  canonicalDecisionId?: string;
+  disposition: JudgeDisposition;
+  reason: string;
+  releaseBlocker: boolean;
+  source: QaFindingSource;
+  roles: (QaRole | "RED_TEAM")[];
+  reproduction: {
+    candidate: { observed: number; attempts: number };
+    baseline: { observed: number; attempts: number };
+  };
+  decidedAt: string;
+};
+
+export type SwarmEventName =
+  | "swarm_started"
+  | "role_started"
+  | "role_completed"
+  | "role_failed"
+  | "judge_started"
+  | "judge_completed"
+  | "reproduction_started"
+  | "reproduction_completed"
+  | "preliminary_verdict"
+  | "red_team_started"
+  | "red_team_finding"
+  | "red_team_completed"
+  | "verdict_revoked"
+  | "final_verdict";
+
+export type SwarmEvent = {
+  name: SwarmEventName;
+  at: string;
+  role?: QaRole | "RED_TEAM";
+  findingId?: string;
+  detail?: string;
+};
+
+export type SwarmRun = {
+  id: string;
+  challengeId: string;
+  challengeRunId: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  stage: SwarmStage;
+  roleRuns: QaRoleRun[];
+  rawFindings: RawSwarmFinding[];
+  normalizedFindings: NormalizedSwarmFinding[];
+  judgeDecisions: JudgeDecision[];
+  preliminaryVerdict?: PreliminaryVerdict;
+  redTeam: {
+    status: RedTeamStatus;
+    targetRoutes: string[];
+    scanIds: { production?: string; candidate?: string; verification?: string };
+    rawFindings: RawSwarmFinding[];
+    normalizedFindings: NormalizedSwarmFinding[];
+    decisions: JudgeDecision[];
+    failure?: { code: string; message: string };
+  };
+  finalVerdict?: FinalVerificationVerdict;
+  adversariallyVerified: boolean;
+  readyRevoked: boolean;
+  counts: {
+    discovered: number;
+    normalized: number;
+    confirmed: number;
+    rejected: number;
+    duplicates: number;
+    baselineIssues: number;
+    unverified: number;
+    environmental: number;
+    releaseBlockers: number;
+  };
+  operations: {
+    durationMs: number;
+    roleDurationMs: number;
+    actionCount: number;
+    verificationRetries: number;
+  };
+  events: SwarmEvent[];
+  failure?: { code: string; message: string };
+};
+
+export type ChallengeEvidence = Pick<
+  IssueEvidence,
+  "url" | "selector" | "value" | "excerpt" | "viewport" | "boundingBox" | "httpStatus" | "requestUrl" | "consoleMessage" | "axeNode" | "dimensions" | "resourceType" | "screenshotId"
+>;
+
+export type ChallengeFinding = {
+  identity: string;
+  classification: ChallengeFindingClassification;
+  ruleId: string;
+  category: IssueCategory;
+  severity: IssueSeverity;
+  title: string;
+  description: string;
+  recommendation: string;
+  route: string;
+  affectedInteraction?: string;
+  productionState: string;
+  candidateState: string;
+  confidence: ChallengeConfidence;
+  reproduction: { observed: number; attempts: number };
+  reason: string;
+  productionEvidence?: ChallengeEvidence;
+  candidateEvidence?: ChallengeEvidence;
+  verificationEvidence?: ChallengeEvidence;
+};
+
+export type ChallengeEventName =
+  | "challenge_started"
+  | "challenge_completed"
+  | "challenge_altqr_won"
+  | "challenge_no_miss_found"
+  | "challenge_insufficient_evidence"
+  | "challenge_regression_opened"
+  | "challenge_rerun";
+
+export type ChallengeEvent = {
+  name: ChallengeEventName;
+  at: string;
+  runId?: string;
+  findingIdentity?: string;
+};
+
+export type ChallengeComparison = {
+  newRegressions: ChallengeFinding[];
+  existingIssues: ChallengeFinding[];
+  fixedIssues: ChallengeFinding[];
+  unverifiedChanges: ChallengeFinding[];
+  qualifyingRegressionCount: number;
+  verificationRequired: boolean;
+  evidenceComplete: boolean;
+};
+
+export type ChallengeRun = {
+  id: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  progress: {
+    stage: ChallengeStage;
+    detail: string;
+    currentScanId?: string;
+    updatedAt: string;
+  };
+  scanIds: {
+    production?: string;
+    candidate?: string;
+    verification?: string;
+  };
+  comparison?: ChallengeComparison;
+  swarm?: SwarmRun;
+  verdict?: ChallengeVerdict;
+  failure?: { code: string; message: string };
+};
+
+export type ChallengeRecord = {
+  id: string;
+  projectId?: string;
+  productionUrl: string;
+  candidateUrl: string;
+  pullRequestUrl?: string;
+  qaStack?: string;
+  existingQaVerdict: ExistingQaVerdict;
+  status: ChallengeStage;
+  createdAt: string;
+  updatedAt: string;
+  activeRunId?: string;
+  runs: ChallengeRun[];
+  events: ChallengeEvent[];
+};
+
+export type ChallengeIndexEntry = {
+  id: string;
+  projectId?: string;
+  productionUrl: string;
+  candidateUrl: string;
+  existingQaVerdict: ExistingQaVerdict;
+  createdAt: string;
+  updatedAt: string;
+  latestRun?: Pick<ChallengeRun, "id" | "createdAt" | "completedAt" | "progress" | "verdict">;
+};
+
+export type ChallengeIndex = { challenges: ChallengeIndexEntry[] };

@@ -1,0 +1,573 @@
+{
+  "benchmarkVersion": "1.0.0",
+  "scannerVersion": "2.1.0",
+  "rulesVersion": "2.1.0",
+  "suite": "full",
+  "generatedAt": "2026-08-14T19:31:34.718Z",
+  "dataset": {
+    "totalScenarios": 47,
+    "cleanScenarios": 6,
+    "faultyScenarios": 30,
+    "invariantScenarios": 11,
+    "deterministicScenarios": 46,
+    "environmentalScenarios": 1,
+    "profiles": [
+      "clean",
+      "document",
+      "accessibility",
+      "runtime",
+      "navigation",
+      "security"
+    ],
+    "categories": [
+      "accessibility",
+      "clean",
+      "evidence",
+      "http-navigation",
+      "identity-deduplication",
+      "performance-runtime",
+      "release-reliability",
+      "security-configuration",
+      "seo-document"
+    ]
+  },
+  "accuracy": {
+    "truePositives": 31,
+    "falsePositives": 9,
+    "falseNegatives": 0,
+    "precision": 0.775,
+    "precisionPercent": 77.5,
+    "recall": 1,
+    "recallPercent": 100,
+    "severityAccuracy": 1,
+    "severityAccuracyPercent": 100,
+    "severityConfusion": {
+      "CRITICALв†’CRITICAL": 9,
+      "NOTICEв†’NOTICE": 11,
+      "WARNINGв†’WARNING": 11
+    },
+    "verdictAccuracy": 1,
+    "verdictAccuracyPercent": 100,
+    "gateAccuracy": 1,
+    "gateAccuracyPercent": 100,
+    "passedProfiles": 4,
+    "totalProfiles": 6
+  },
+  "evidence": {
+    "accuracy": 0.8709677419354839,
+    "accuracyPercent": 87.1,
+    "failures": [
+      {
+        "profileId": "runtime",
+        "expectationId": "script-request",
+        "ruleId": "request-failure",
+        "reasons": [
+          "occurrences 2 != 1"
+        ]
+      },
+      {
+        "profileId": "runtime",
+        "expectationId": "stylesheet-request",
+        "ruleId": "request-failure",
+        "reasons": [
+          "occurrences 2 != 1"
+        ]
+      },
+      {
+        "profileId": "runtime",
+        "expectationId": "font-request",
+        "ruleId": "request-failure",
+        "reasons": [
+          "occurrences 2 != 1"
+        ]
+      },
+      {
+        "profileId": "security",
+        "expectationId": "shared-resource",
+        "ruleId": "request-failure",
+        "reasons": [
+          "affected pages 1 != 2"
+        ]
+      }
+    ]
+  },
+  "determinism": {
+    "profiles": [
+      {
+        "profileId": "clean",
+        "runs": 5,
+        "stableRuns": 5,
+        "rate": 1,
+        "mismatchedRuns": []
+      },
+      {
+        "profileId": "navigation",
+        "runs": 5,
+        "stableRuns": 5,
+        "rate": 1,
+        "mismatchedRuns": []
+      }
+    ],
+    "runs": 10,
+    "stableRuns": 10,
+    "rate": 1,
+    "ratePercent": 100
+  },
+  "profiles": [
+    {
+      "profileId": "clean",
+      "stage": "COMPLETE",
+      "inspectedPages": 6,
+      "score": 100,
+      "gate": "PASS",
+      "verdict": "READY TO SHIP",
+      "lighthouse": {
+        "available": true
+      },
+      "evaluation": {
+        "profileId": "clean",
+        "scenarioCount": 7,
+        "truePositives": 0,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "severity": {
+          "correct": 0,
+          "evaluated": 0
+        },
+        "severityConfusion": {},
+        "verdict": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "gate": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "evidence": {
+          "correct": 0,
+          "evaluated": 0
+        },
+        "missingFindings": [],
+        "unexpectedFindings": [],
+        "severityMismatches": [],
+        "evidenceFailures": [],
+        "forbiddenViolations": [],
+        "pageFailures": [],
+        "verdictFailures": [],
+        "gateFailures": [],
+        "environmentalFindings": [],
+        "passed": true
+      }
+    },
+    {
+      "profileId": "document",
+      "stage": "COMPLETE",
+      "inspectedPages": 10,
+      "score": 90,
+      "gate": "FAIL",
+      "verdict": "BLOCKED",
+      "lighthouse": {
+        "available": true
+      },
+      "evaluation": {
+        "profileId": "document",
+        "scenarioCount": 10,
+        "truePositives": 9,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "severity": {
+          "correct": 9,
+          "evaluated": 9
+        },
+        "severityConfusion": {
+          "CRITICALв†’CRITICAL": 2,
+          "NOTICEв†’NOTICE": 2,
+          "WARNINGв†’WARNING": 5
+        },
+        "verdict": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "gate": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "evidence": {
+          "correct": 9,
+          "evaluated": 9
+        },
+        "missingFindings": [],
+        "unexpectedFindings": [],
+        "severityMismatches": [],
+        "evidenceFailures": [],
+        "forbiddenViolations": [],
+        "pageFailures": [],
+        "verdictFailures": [],
+        "gateFailures": [],
+        "environmentalFindings": [],
+        "passed": true
+      }
+    },
+    {
+      "profileId": "accessibility",
+      "stage": "COMPLETE",
+      "inspectedPages": 4,
+      "score": 96,
+      "gate": "FAIL",
+      "verdict": "BLOCKED",
+      "lighthouse": {
+        "available": true
+      },
+      "evaluation": {
+        "profileId": "accessibility",
+        "scenarioCount": 4,
+        "truePositives": 2,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "severity": {
+          "correct": 2,
+          "evaluated": 2
+        },
+        "severityConfusion": {
+          "CRITICALв†’CRITICAL": 1,
+          "WARNINGв†’WARNING": 1
+        },
+        "verdict": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "gate": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "evidence": {
+          "correct": 2,
+          "evaluated": 2
+        },
+        "missingFindings": [],
+        "unexpectedFindings": [],
+        "severityMismatches": [],
+        "evidenceFailures": [],
+        "forbiddenViolations": [],
+        "pageFailures": [],
+        "verdictFailures": [],
+        "gateFailures": [],
+        "environmentalFindings": [],
+        "passed": true
+      }
+    },
+    {
+      "profileId": "runtime",
+      "stage": "COMPLETE",
+      "inspectedPages": 9,
+      "score": 92,
+      "gate": "FAIL",
+      "verdict": "BLOCKED",
+      "lighthouse": {
+        "available": true
+      },
+      "evaluation": {
+        "profileId": "runtime",
+        "scenarioCount": 10,
+        "truePositives": 9,
+        "falsePositives": 5,
+        "falseNegatives": 0,
+        "severity": {
+          "correct": 9,
+          "evaluated": 9
+        },
+        "severityConfusion": {
+          "WARNINGв†’WARNING": 1,
+          "NOTICEв†’NOTICE": 6,
+          "CRITICALв†’CRITICAL": 2
+        },
+        "verdict": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "gate": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "evidence": {
+          "correct": 6,
+          "evaluated": 9
+        },
+        "missingFindings": [],
+        "unexpectedFindings": [
+          {
+            "ruleId": "console-error",
+            "severity": "WARNING",
+            "pagePath": "/resource-image",
+            "occurrences": 1
+          },
+          {
+            "ruleId": "console-error",
+            "severity": "WARNING",
+            "pagePath": "/resource-script",
+            "occurrences": 1
+          },
+          {
+            "ruleId": "console-error",
+            "severity": "WARNING",
+            "pagePath": "/resource-stylesheet",
+            "occurrences": 1
+          },
+          {
+            "ruleId": "console-error",
+            "severity": "WARNING",
+            "pagePath": "/resource-font",
+            "occurrences": 1
+          },
+          {
+            "ruleId": "console-error",
+            "severity": "WARNING",
+            "pagePath": "/resource-fetch",
+            "occurrences": 1
+          }
+        ],
+        "severityMismatches": [],
+        "evidenceFailures": [
+          {
+            "expectationId": "script-request",
+            "ruleId": "request-failure",
+            "reasons": [
+              "occurrences 2 != 1"
+            ]
+          },
+          {
+            "expectationId": "stylesheet-request",
+            "ruleId": "request-failure",
+            "reasons": [
+              "occurrences 2 != 1"
+            ]
+          },
+          {
+            "expectationId": "font-request",
+            "ruleId": "request-failure",
+            "reasons": [
+              "occurrences 2 != 1"
+            ]
+          }
+        ],
+        "forbiddenViolations": [
+          {
+            "scenarioId": "runtime-image-failure",
+            "forbiddenId": "image-console-duplicate",
+            "finding": {
+              "ruleId": "console-error",
+              "severity": "WARNING",
+              "pagePath": "/resource-image",
+              "occurrences": 1
+            }
+          },
+          {
+            "scenarioId": "runtime-script-failure",
+            "forbiddenId": "script-console-duplicate",
+            "finding": {
+              "ruleId": "console-error",
+              "severity": "WARNING",
+              "pagePath": "/resource-script",
+              "occurrences": 1
+            }
+          },
+          {
+            "scenarioId": "runtime-stylesheet-failure",
+            "forbiddenId": "stylesheet-console-duplicate",
+            "finding": {
+              "ruleId": "console-error",
+              "severity": "WARNING",
+              "pagePath": "/resource-stylesheet",
+              "occurrences": 1
+            }
+          },
+          {
+            "scenarioId": "runtime-font-failure",
+            "forbiddenId": "font-console-duplicate",
+            "finding": {
+              "ruleId": "console-error",
+              "severity": "WARNING",
+              "pagePath": "/resource-font",
+              "occurrences": 1
+            }
+          },
+          {
+            "scenarioId": "runtime-fetch-failure",
+            "forbiddenId": "fetch-console-duplicate",
+            "finding": {
+              "ruleId": "console-error",
+              "severity": "WARNING",
+              "pagePath": "/resource-fetch",
+              "occurrences": 1
+            }
+          }
+        ],
+        "pageFailures": [],
+        "verdictFailures": [],
+        "gateFailures": [],
+        "environmentalFindings": [],
+        "passed": false
+      }
+    },
+    {
+      "profileId": "navigation",
+      "stage": "COMPLETE",
+      "inspectedPages": 6,
+      "score": 91,
+      "gate": "FAIL",
+      "verdict": "BLOCKED",
+      "lighthouse": {
+        "available": true
+      },
+      "evaluation": {
+        "profileId": "navigation",
+        "scenarioCount": 8,
+        "truePositives": 8,
+        "falsePositives": 0,
+        "falseNegatives": 0,
+        "severity": {
+          "correct": 8,
+          "evaluated": 8
+        },
+        "severityConfusion": {
+          "CRITICALв†’CRITICAL": 4,
+          "WARNINGв†’WARNING": 4
+        },
+        "verdict": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "gate": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "evidence": {
+          "correct": 8,
+          "evaluated": 8
+        },
+        "missingFindings": [],
+        "unexpectedFindings": [],
+        "severityMismatches": [],
+        "evidenceFailures": [],
+        "forbiddenViolations": [],
+        "pageFailures": [],
+        "verdictFailures": [],
+        "gateFailures": [],
+        "environmentalFindings": [],
+        "passed": true
+      }
+    },
+    {
+      "profileId": "security",
+      "stage": "COMPLETE",
+      "inspectedPages": 7,
+      "score": 97,
+      "gate": "PASS",
+      "verdict": "READY WITH WARNINGS",
+      "lighthouse": {
+        "available": true
+      },
+      "evaluation": {
+        "profileId": "security",
+        "scenarioCount": 8,
+        "truePositives": 3,
+        "falsePositives": 4,
+        "falseNegatives": 0,
+        "severity": {
+          "correct": 3,
+          "evaluated": 3
+        },
+        "severityConfusion": {
+          "NOTICEв†’NOTICE": 3
+        },
+        "verdict": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "gate": {
+          "correct": 1,
+          "evaluated": 1
+        },
+        "evidence": {
+          "correct": 2,
+          "evaluated": 3
+        },
+        "missingFindings": [],
+        "unexpectedFindings": [
+          {
+            "ruleId": "console-error",
+            "severity": "WARNING",
+            "pagePath": "/shared-a",
+            "occurrences": 1
+          },
+          {
+            "ruleId": "console-error",
+            "severity": "WARNING",
+            "pagePath": "/shared-b",
+            "occurrences": 1
+          },
+          {
+            "ruleId": "request-failure",
+            "severity": "NOTICE",
+            "pagePath": "/shared-b",
+            "requestPath": "/shared-missing-script",
+            "occurrences": 2
+          },
+          {
+            "ruleId": "console-error",
+            "severity": "WARNING",
+            "pagePath": "/repeated-resource",
+            "occurrences": 3
+          }
+        ],
+        "severityMismatches": [],
+        "evidenceFailures": [
+          {
+            "expectationId": "shared-resource",
+            "ruleId": "request-failure",
+            "reasons": [
+              "affected pages 1 != 2"
+            ]
+          }
+        ],
+        "forbiddenViolations": [
+          {
+            "scenarioId": "dedupe-network-console",
+            "forbiddenId": "shared-console-duplicate",
+            "finding": {
+              "ruleId": "console-error",
+              "severity": "WARNING",
+              "pagePath": "/shared-a",
+              "occurrences": 1
+            }
+          },
+          {
+            "scenarioId": "dedupe-network-console",
+            "forbiddenId": "shared-console-duplicate",
+            "finding": {
+              "ruleId": "console-error",
+              "severity": "WARNING",
+              "pagePath": "/shared-b",
+              "occurrences": 1
+            }
+          },
+          {
+            "scenarioId": "dedupe-network-console",
+            "forbiddenId": "shared-console-duplicate",
+            "finding": {
+              "ruleId": "console-error",
+              "severity": "WARNING",
+              "pagePath": "/repeated-resource",
+              "occurrences": 3
+            }
+          }
+        ],
+        "pageFailures": [],
+        "verdictFailures": [],
+        "gateFailures": [],
+        "environmentalFindings": [],
+        "passed": false
+      }
+    }
+  ]
+}

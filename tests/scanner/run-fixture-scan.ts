@@ -43,7 +43,8 @@ async function main() {
     );
     const networkTypes = new Set(baseline.pages.flatMap((page) => page.networkFailures.map((failure) => failure.resourceType)));
     for (const type of ["document", "image", "script", "stylesheet", "font", "fetch/xhr"]) assert.ok(networkTypes.has(type as typeof baseline.pages[number]["networkFailures"][number]["resourceType"]), `missing network resource classification: ${type}`);
-    assert.ok(baseline.pages.some((page) => page.networkFailures.some((failure) => failure.status === 413)), "oversized browser resources must be blocked before their full body is admitted");
+    assert.ok(baseline.pages.some((page) => page.auditFailures.some((failure) => failure.system === "network-policy" && failure.message.includes("RESOURCE_TOO_LARGE"))), "oversized browser resources must be blocked and recorded as scanner-policy evidence");
+    assert.equal(baseline.issues.some((issue) => issue.ruleId === "request-failure" && issue.evidence.requestUrl?.endsWith("/oversized-image")), false, "a scanner size limit must not become a website resource defect");
     assert.equal(fixture.getUpgradeAttempts(), 0, "scanner pages must not create outbound WebSocket connections");
     assert.ok(baseline.pages.some((page) => page.consoleEvents.some((event) => event.level === "warning" && event.count === 2)), "repeated console warnings must be deduplicated with a repeat count");
     assert.ok(baseline.lighthouse.available, `Lighthouse must return real fixture metrics: ${baseline.lighthouse.error ?? "no metrics"}`);
@@ -54,8 +55,8 @@ async function main() {
     }
     assert.ok(baseline.score && baseline.score.overall >= 0 && baseline.score.overall <= 100);
     assert.ok(baseline.releaseGate && baseline.verdict && baseline.fixQueue.length && baseline.pageHealth.length);
-    assert.equal(baseline.scannerVersion, "2.1.0");
-    assert.equal(baseline.rulesVersion, "2.1.0");
+    assert.equal(baseline.scannerVersion, "2.3.0");
+    assert.equal(baseline.rulesVersion, "2.2.0");
     assert.deepEqual(baseline.configSnapshot.mobileViewport, { width: 390, height: 844, deviceScaleFactor: 1 });
     await store.setProjectBaseline(baseline.projectId, baseline.id);
     assert.equal((await store.getProject(baseline.projectId))?.baselineScanId, baseline.id, "project baseline must persist before the comparison scan");
@@ -89,6 +90,31 @@ async function main() {
     const missingLangSeed = await store.createScan(`${fixture.origin}/missing-lang`, normalizeUrl(`${fixture.origin}/missing-lang`));
     const missingLang = await worker.runScanAndWait(missingLangSeed.id);
     assert.ok(missingLang.issues.some((issue) => issue.ruleId === "missing-lang"), "axe/manual language evidence must fire on a real page without html[lang]");
+
+    const domBudgetSeed = await store.createScan(`${fixture.origin}/dom-budget`, normalizeUrl(`${fixture.origin}/dom-budget`));
+    const domBudget = await worker.runScanAndWait(domBudgetSeed.id);
+    assert.equal(domBudget.progress.stage, "FAILED", "a hostile rendered DOM must stop at the scanner evidence budget");
+    assert.equal(domBudget.failure?.code, "PRIMARY_NAVIGATION_FAILED");
+
+    const policySeed = await store.createScan(`${fixture.origin}/policy-limited`, normalizeUrl(`${fixture.origin}/policy-limited`));
+    const policyLimited = await worker.runScanAndWait(policySeed.id);
+    assert.equal(policyLimited.progress.stage, "COMPLETE");
+    assert.ok(policyLimited.pages[0]?.auditFailures.some((failure) => failure.system === "network-policy"), "scanner policy limits must remain visible as partial evidence");
+    assert.equal(policyLimited.issues.some((issue) => issue.ruleId === "request-failure" && ["/passive-write", "/oversized-image"].some((path) => issue.evidence.requestUrl?.endsWith(path))), false, "scanner-generated safety responses must not become website resource findings");
+    assert.equal(policyLimited.issues.some((issue) => issue.ruleId === "console-error" && issue.evidence.consoleMessage?.includes("Failed to load resource")), false, "browser console noise from scanner policy responses must not become a site error");
+
+    const [{ chromium }, { installSafeBrowserRouting, PASSIVE_CHROMIUM_ARGS }] = await Promise.all([import("playwright"), import("../../lib/qr/safe-request")]);
+    const guardBrowser = await chromium.launch({ headless: true, args: [...PASSIVE_CHROMIUM_ARGS] });
+    try {
+      const guardContext = await guardBrowser.newContext({ serviceWorkers: "block" });
+      await installSafeBrowserRouting(guardContext);
+      const guardPage = await guardContext.newPage();
+      await guardPage.goto("data:text/html,<title>passive guard</title>");
+      await assert.rejects(() => guardPage.evaluate(() => new RTCPeerConnection()), /WebRTC is disabled/);
+      await guardContext.close();
+    } finally {
+      await guardBrowser.close();
+    }
 
     const unreachableSeed = await store.createScan(`${fixture.origin}/partial-failure`, normalizeUrl(`${fixture.origin}/partial-failure`));
     const unreachable = await worker.runScanAndWait(unreachableSeed.id);

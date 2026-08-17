@@ -8,8 +8,10 @@ import { comparePngBuffers } from "../../lib/qr/diff";
 import { buildFixQueue, buildPageHealth, groupIssues } from "../../lib/qr/analysis";
 import { compareIssueSets } from "../../lib/qr/comparison";
 import { hasUsableLighthouseData, runLighthouseAudit } from "../../lib/qr/lighthouse";
+import { coalesceNetworkFailures, filterStructuredNetworkConsoleDuplicates } from "../../lib/qr/network";
 import { buildPerformanceReadings } from "../../lib/qr/performance";
 import { DEFAULT_RELEASE_GATE, deriveShipVerdict, evaluateReleaseGate } from "../../lib/qr/release";
+import { isAllowedByRobots, parseRobotsPolicy } from "../../lib/qr/robots";
 import { evaluatePages, stableIssueFingerprint } from "../../lib/qr/rules/evaluate";
 import { calculateScore } from "../../lib/qr/scoring";
 import { sanitizeDiagnosticText } from "../../lib/qr/sanitize";
@@ -75,6 +77,20 @@ test("browser resource guard blocks unsupported schemes and executable/archive d
   assert.equal(isLikelyMaliciousDownload("https://example.com/image.png"), false);
   await assert.rejects(() => guardBrowserRequest("file:///etc/passwd"), (error: unknown) => error instanceof TargetUrlError && error.code === "UNSUPPORTED_RESOURCE");
   await assert.rejects(() => guardBrowserRequest("https://example.com/setup.exe"), (error: unknown) => error instanceof TargetUrlError && error.code === "DOWNLOAD_BLOCKED");
+});
+
+test("robots parser applies every matching agent in a grouped record", () => {
+  const policy = parseRobotsPolicy("https://example.com", `
+User-agent: *
+User-agent: Googlebot
+Disallow: /private
+
+User-agent: OtherBot
+Disallow: /other-only
+`);
+  assert.equal(isAllowedByRobots("https://example.com/private/report", policy), false);
+  assert.equal(isAllowedByRobots("https://example.com/other-only/report", policy), true);
+  assert.equal(isAllowedByRobots("https://example.com/public", policy), true);
 });
 
 test("rule evaluation creates evidence-backed findings", () => {
@@ -269,4 +285,56 @@ test("diagnostic sanitization removes Windows paths containing spaces and Playwr
   assert.equal(cleaned.includes("ALT ai"), false);
   assert.equal(cleaned.includes("playwright"), false);
   assert.equal(cleaned.includes("[local path]"), true);
+});
+
+test("structured network failures suppress browser duplicates and aggregate shared resources across pages", () => {
+  const failedUrl = "https://example.com/shared.js";
+  const networkFailures: PageAudit["networkFailures"] = [
+    { method: "GET", url: failedUrl, resourceType: "script", reason: "HTTP 404", status: 404, count: 1 },
+    { method: "GET", url: failedUrl, resourceType: "script", reason: "net::ERR_ABORTED", count: 1 },
+  ];
+  const duplicateConsole: PageAudit["consoleEvents"] = [{
+    level: "error", message: "Failed to load resource: the server responded with a status of 404 (Not Found)", url: failedUrl, count: 1,
+  }];
+  const first = basePage({ id: "page-a", url: "https://example.com/a", networkFailures, consoleEvents: duplicateConsole });
+  const second = basePage({ id: "page-b", url: "https://example.com/b", networkFailures, consoleEvents: duplicateConsole });
+  const issues = dedupeIssues(evaluatePages([first, second], { available: false }));
+  const resourceFindings = issues.filter((entry) => entry.ruleId === "request-failure");
+  assert.equal(resourceFindings.length, 1);
+  assert.equal(resourceFindings[0].scope, "SITE");
+  assert.equal(resourceFindings[0].occurrences, 2);
+  assert.deepEqual(resourceFindings[0].affectedPageIds.sort(), ["page-a", "page-b"]);
+  assert.equal(issues.some((entry) => entry.ruleId === "console-error"), false);
+});
+
+test("raw browser observations retain one structured event per failed request", () => {
+  const url = "https://example.com/app.js";
+  const failures: PageAudit["networkFailures"] = [
+    { method: "GET", url, resourceType: "script", reason: "HTTP 404", status: 404, count: 1 },
+    { method: "GET", url, resourceType: "script", reason: "net::ERR_ABORTED", count: 1 },
+    { method: "GET", url: "https://example.com/offline.js", resourceType: "script", reason: "net::ERR_NAME_NOT_RESOLVED", count: 1 },
+  ];
+  const normalized = coalesceNetworkFailures(failures);
+  assert.deepEqual(normalized.map((failure) => [failure.url, failure.reason]), [
+    [url, "HTTP 404"],
+    ["https://example.com/offline.js", "net::ERR_NAME_NOT_RESOLVED"],
+  ]);
+  const consoleEvents: PageAudit["consoleEvents"] = [
+    { level: "error", message: "Failed to load resource: the server responded with a status of 404 (Not Found)", url, count: 1 },
+    { level: "error", message: "Application failed to load resource", url: "https://example.com/page", count: 1 },
+  ];
+  assert.deepEqual(filterStructuredNetworkConsoleDuplicates(consoleEvents, normalized).map((event) => event.message), ["Application failed to load resource"]);
+});
+
+test("score and gate invariants follow deduplicated underlying findings", () => {
+  const blockerPage = basePage({ facts: { ...basePage().facts, title: "" } });
+  const blocker = evaluatePages([blockerPage], { available: false }).find((entry) => entry.ruleId === "missing-title");
+  assert.ok(blocker);
+  const oneFinding = calculateScore(dedupeIssues([blocker]));
+  const duplicateObservation = calculateScore(dedupeIssues([blocker, { ...blocker, id: crypto.randomUUID() }]));
+  const repaired = calculateScore([]);
+  assert.deepEqual(duplicateObservation, oneFinding, "duplicate observations must not multiply the score penalty");
+  assert.ok(oneFinding.overall < repaired.overall, "adding a genuine blocker must not improve the score");
+  assert.equal(evaluateReleaseGate(oneFinding, [blocker], [blockerPage], DEFAULT_RELEASE_GATE).status, "FAIL");
+  assert.equal(evaluateReleaseGate(repaired, [], [basePage()], DEFAULT_RELEASE_GATE).status, "PASS");
 });

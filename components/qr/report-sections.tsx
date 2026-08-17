@@ -47,10 +47,10 @@ export function IssueLedger({ scan, category, onCategoryChange, onToggleIgnore }
     <section className="issue-ledger report-section" id="issues" aria-labelledby="issues-heading">
       <div className="section-heading"><div><span>Evidence</span><h2 id="issues-heading">Issue ledger</h2><p>{filtered.length} grouped finding{filtered.length === 1 ? "" : "s"}</p></div></div>
       <div className="issue-filters" aria-label="Filter issues">
-        <label className="issue-search"><span>Search</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rule, page, or evidence" /></label>
+        <label className="issue-search"><span>Search</span><input name="issueSearch" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rule, page, or evidence…" autoComplete="off" spellCheck={false} /></label>
         <div className="severity-filter" role="group" aria-label="Severity">{SEVERITIES.map((item) => <button key={item} type="button" aria-pressed={severity === item} onClick={() => setSeverity(item)}>{item === "ALL" ? "All severities" : item.toLowerCase()}</button>)}</div>
-        <label><span>Category</span><select value={category} onChange={(event) => onCategoryChange(event.target.value as IssueCategory | "all")}><option value="all">All categories</option>{categories.map((item) => <option value={item} key={item}>{item}</option>)}</select></label>
-        <label><span>State</span><select value={view} onChange={(event) => setView(event.target.value as typeof view)}><option value="ALL">All states</option><option value="NEW">New</option><option value="REGRESSION">Regressions</option><option value="ACTIVE">Active</option><option value="IGNORED">Ignored</option></select></label>
+        <label><span>Category</span><select name="issueCategory" value={category} onChange={(event) => onCategoryChange(event.target.value as IssueCategory | "all")}><option value="all">All categories</option>{categories.map((item) => <option value={item} key={item}>{item}</option>)}</select></label>
+        <label><span>State</span><select name="issueState" value={view} onChange={(event) => setView(event.target.value as typeof view)}><option value="ALL">All states</option><option value="NEW">New</option><option value="REGRESSION">Regressions</option><option value="ACTIVE">Active</option><option value="IGNORED">Ignored</option></select></label>
       </div>
 
       <div className="issue-groups">
@@ -75,9 +75,12 @@ export function IssueLedger({ scan, category, onCategoryChange, onToggleIgnore }
               <div className="affected-pages"><span>Where</span><div>{group.affectedPages.map((pageId) => <a href={`#page-${pageId}`} key={pageId} onClick={() => window.requestAnimationFrame(() => { const details = document.getElementById(`page-${pageId}`) as HTMLDetailsElement | null; if (details) details.open = true; })}><code>{pathLabel(pageUrlById.get(pageId) ?? lead?.evidence.url ?? pageId)}</code></a>)}</div></div>
               <div className="occurrence-list"><span>Evidence by occurrence</span>{findings.map((issue) => {
                 const capture = captureForIssue(scan, issue);
+                const evidencePage = scan.pages.find((page) => issue.affectedPageIds.includes(page.id) || page.url === issue.evidence.url);
+                const partialEvidence = Boolean(evidencePage?.failure || evidencePage?.auditFailures.length);
                 return <details className="occurrence" key={issue.fingerprint}>
                   <summary><span>{pathLabel(issue.evidence.url)}</span><small>{deltaByFingerprint.get(issue.fingerprint) ?? issue.lifecycle}</small><b>{issue.occurrences}×</b></summary>
                   <div>
+                    <p className="evidence-confidence" data-confidence={partialEvidence ? "partial" : "captured"}><b>{partialEvidence ? "Partial evidence" : "Captured evidence"}</b><span>{partialEvidence ? "This page audit recorded a scanner or capture limitation; use the evidence with that constraint." : "This finding is linked to the stored response, DOM, runtime, or measurement evidence shown below."}</span></p>
                     <dl>{issueEvidenceLines(issue).map(([label, value]) => <div key={label}><dt>{label}</dt><dd><code>{value}</code></dd></div>)}</dl>
                     <div className="occurrence-actions">{capture ? <a href={assetUrl(capture)} target="_blank" rel="noreferrer">Open screenshot</a> : <span>No screenshot for this page</span>}<button type="button" onClick={() => void toggle(issue)} disabled={updating === issue.fingerprint}>{updating === issue.fingerprint ? "Saving…" : issue.lifecycle === "IGNORED" ? "Restore finding" : "Ignore finding"}</button></div>
                   </div>

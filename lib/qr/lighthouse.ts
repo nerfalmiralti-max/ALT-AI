@@ -6,7 +6,7 @@ import path from "node:path";
 import { chromium, type BrowserContext } from "playwright";
 
 import { scannerConfig } from "./config";
-import { installSafeBrowserRouting } from "./safe-request";
+import { installSafeBrowserRouting, PASSIVE_CHROMIUM_ARGS, type ScanResourceBudget } from "./safe-request";
 import { sanitizeDiagnosticText } from "./sanitize";
 import type { LighthouseMetrics } from "./types";
 
@@ -44,7 +44,7 @@ function abortPromise(signal: AbortSignal) {
   });
 }
 
-export async function runLighthouseAudit(url: string, signal?: AbortSignal): Promise<LighthouseMetrics> {
+export async function runLighthouseAudit(url: string, signal?: AbortSignal, budget?: ScanResourceBudget): Promise<LighthouseMetrics> {
   let context: BrowserContext | undefined;
   let profileDirectory: string | undefined;
   const started = performance.now();
@@ -62,11 +62,11 @@ export async function runLighthouseAudit(url: string, signal?: AbortSignal): Pro
       acceptDownloads: false,
       serviceWorkers: "block",
       userAgent: scannerConfig.userAgent,
-      args: [`--remote-debugging-port=${port}`, "--disable-dev-shm-usage"],
+      args: [`--remote-debugging-port=${port}`, "--disable-dev-shm-usage", ...PASSIVE_CHROMIUM_ARGS],
     });
     void launch.then((startedContext) => { if (runSignal.aborted) void startedContext.close().catch(() => undefined); }).catch(() => undefined);
     context = await Promise.race([launch, abortPromise(runSignal)]);
-    await Promise.race([installSafeBrowserRouting(context, runSignal), abortPromise(runSignal)]);
+    await Promise.race([installSafeBrowserRouting(context, runSignal, budget), abortPromise(runSignal)]);
     const result = await Promise.race([
       lighthouse(url, {
         port,

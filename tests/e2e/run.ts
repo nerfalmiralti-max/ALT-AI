@@ -43,10 +43,10 @@ async function main() {
   if (!testData.startsWith(`${dataRoot}${path.sep}`)) throw new Error("Refusing to clear E2E data outside the ALT QR test store");
   await rm(testData, { recursive: true, force: true });
   const fixture = start(["node_modules/tsx/dist/cli.mjs", "tests/fixtures/standalone.ts"], { ...common, FIXTURE_PORT: "4173" });
-  const nextEnv = { ...common, ALT_QR_DATA_DIR: ".alt-qr-data/e2e", ALT_QR_ALLOW_PRIVATE_TARGETS: "true" };
+  const nextEnv = { ...common, ALT_QR_DATA_DIR: ".alt-qr-data/e2e", ALT_QR_ALLOW_PRIVATE_TARGETS: "true", ALT_QR_CHALLENGE_MAX_PAGES: "1" };
   let next = start(["node_modules/next/dist/bin/next", "dev", "-p", "3100"], nextEnv);
   try {
-    await Promise.all([waitFor("http://127.0.0.1:4173/good", 30_000), waitFor("http://127.0.0.1:3100", 120_000)]);
+    await Promise.all([waitFor("http://127.0.0.1:4173/good", 30_000), waitFor("http://127.0.0.1:4174/good", 30_000), waitFor("http://127.0.0.1:3100", 120_000)]);
     await runTests(common, "initial");
     await terminate(next);
     next = start(["node_modules/next/dist/bin/next", "dev", "-p", "3100"], nextEnv);

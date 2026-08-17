@@ -4,21 +4,14 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import type { IssueCategory, ProjectRecord, ScanIssue, ScanRecord } from "@/lib/qr/types";
-import { BrandMark } from "./brand-mark";
+import { CompareIcon, SettingsIcon } from "./icons";
 import { ScanForm } from "./scan-form";
 import { ScanProgress } from "./scan-progress";
 import { displayHost, type ReportPayload } from "./report-model";
 import { CategoryHealth, FixFirst, ReleaseBrief, ReportNavigation, WhatChanged } from "./report-overview";
-import { GateConfigEditor, IssueLedger, PageExplorer, RuntimeAndPerformance, ScanHistory } from "./report-sections";
+import { IssueLedger, PageExplorer, RuntimeAndPerformance, ScanHistory } from "./report-sections";
 import { VerificationMark } from "./verification-mark";
 import { VisualInspector } from "./visual-inspector";
-
-function reportState(scan: ScanRecord | undefined) {
-  if (!scan || !["COMPLETE", "FAILED", "CANCELLED"].includes(scan.progress.stage)) return "scanning" as const;
-  if (scan.verdict === "READY TO SHIP") return "verified" as const;
-  if (scan.progress.stage === "FAILED" || scan.verdict === "BLOCKED") return "blocked" as const;
-  return "partial" as const;
-}
 
 export function ScanReport({ scanId }: { scanId: string }) {
   const [payload, setPayload] = useState<ReportPayload | null>(null);
@@ -66,9 +59,7 @@ export function ScanReport({ scanId }: { scanId: string }) {
       if (!response.ok || !body.project) throw new Error(body.error || "Baseline could not be updated.");
       setPayload({ ...payload, project: body.project, baseline: enabled ? { id: payload.scan.id, screenshots: payload.scan.screenshots, score: payload.scan.score, verdict: payload.scan.verdict, completedAt: payload.scan.completedAt } : null });
       setActionMessage(body.syncWarning ?? (enabled ? "This scan is now the project baseline." : "Project baseline cleared."));
-    } catch (reason) {
-      setActionMessage(reason instanceof Error ? reason.message : "Baseline could not be updated.");
-    }
+    } catch (reason) { setActionMessage(reason instanceof Error ? reason.message : "Baseline could not be updated."); }
   }
 
   async function toggleIgnore(issue: ScanIssue) {
@@ -79,9 +70,7 @@ export function ScanReport({ scanId }: { scanId: string }) {
       if (!response.ok || !body.scan) throw new Error(body.error || "Finding lifecycle could not be updated.");
       setPayload({ ...payload, scan: body.scan });
       setActionMessage(body.syncWarning ?? (issue.lifecycle === "IGNORED" ? "Finding restored." : "Finding ignored for this project."));
-    } catch (reason) {
-      setActionMessage(reason instanceof Error ? reason.message : "Finding lifecycle could not be updated.");
-    }
+    } catch (reason) { setActionMessage(reason instanceof Error ? reason.message : "Finding lifecycle could not be updated."); }
   }
 
   function selectCategory(next: IssueCategory | "all", moveToIssues = false) {
@@ -94,43 +83,38 @@ export function ScanReport({ scanId }: { scanId: string }) {
   const canCompare = Boolean(payload?.scan.comparisons.previous || payload?.scan.comparisons.baseline);
 
   return (
-    <main className="app-shell report-shell">
-      <a className="skip-link" href="#report-main">Skip to report</a>
-      <header className="topbar report-topbar">
-        <BrandMark />
-        <div className="topbar-status"><VerificationMark state={reportState(payload?.scan)} /><span>{completed ? payload?.scan.verdict?.toLowerCase() : payload?.scan.progress.stage.toLowerCase()}</span></div>
-        <Link className="topbar-link" href="/">New scan</Link>
-      </header>
-
+    <main id="main-content" className="control-page report-shell">
       {actionMessage ? <p className="action-message" role="status">{actionMessage}</p> : null}
-      {error ? <section className="load-error" role="alert"><VerificationMark state="blocked" /><h1>{error}</h1><Link href="/">Return to scanner</Link></section> : null}
+      {error ? <section className="load-error" role="alert"><VerificationMark state="blocked" /><h1>{error}</h1><Link href="/scan/new">Return to scanner</Link></section> : null}
       {!payload && !error ? <div className="report-loading"><VerificationMark state="scanning" /><span>Loading scan record…</span></div> : null}
 
       <div id="report-main">{payload ? !completed ? <ScanProgress scan={payload.scan} onCancel={() => void cancel()} cancelling={cancelling} /> : <>
         <div className="report-context">
-          <div><span>Project</span><strong>{displayHost(payload.scan.normalizedUrl)}</strong><small>Scan {payload.scan.id.slice(0, 8)}</small></div>
+          <div><span>Project / scan</span><Link href={`/projects/${payload.project.id}`}><strong>{displayHost(payload.scan.normalizedUrl)}</strong></Link><small>{payload.scan.id.slice(0, 8)}</small></div>
           <time dateTime={payload.scan.completedAt}>{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(payload.scan.completedAt!))}</time>
           <div className="report-actions">
             <ScanForm buttonOnly initialUrl={payload.scan.normalizedUrl} />
-            {canCompare ? <a href="#changed">Compare</a> : null}
+            {canCompare ? <Link href={`/scan/${scanId}/compare`}><CompareIcon />Compare</Link> : null}
             <a href={`/api/scans/${scanId}/receipt`} download>Export</a>
             <button type="button" onClick={() => void setBaseline(!isBaseline)}>{isBaseline ? "Clear baseline" : "Set baseline"}</button>
+            <Link href={`/projects/${payload.project.id}/settings`}><SettingsIcon />Gate</Link>
             <button type="button" onClick={() => window.print()}>Print</button>
           </div>
         </div>
-        <ReportNavigation />
-        <ReleaseBrief payload={payload} />
-        <div className="overview-panels"><FixFirst scan={payload.scan} /><CategoryHealth scan={payload.scan} selected={category} onSelect={(next) => selectCategory(next, true)} /></div>
-        <WhatChanged scan={payload.scan} />
-        <IssueLedger scan={payload.scan} category={category} onCategoryChange={selectCategory} onToggleIgnore={toggleIgnore} />
-        <PageExplorer scan={payload.scan} />
-        <RuntimeAndPerformance scan={payload.scan} />
-        <VisualInspector payload={payload} />
-        <ScanHistory payload={payload} />
-        <GateConfigEditor payload={payload} onUpdated={setPayload} />
+        <div className="report-workspace">
+          <ReportNavigation />
+          <div className="report-canvas">
+            <ReleaseBrief payload={payload} />
+            <div className="overview-panels"><FixFirst scan={payload.scan} /><CategoryHealth scan={payload.scan} selected={category} onSelect={(next) => selectCategory(next, true)} /></div>
+            <WhatChanged scan={payload.scan} />
+            <IssueLedger scan={payload.scan} category={category} onCategoryChange={selectCategory} onToggleIgnore={toggleIgnore} />
+            <PageExplorer scan={payload.scan} />
+            <RuntimeAndPerformance scan={payload.scan} />
+            <VisualInspector payload={payload} />
+            <ScanHistory payload={payload} />
+          </div>
+        </div>
       </> : null}</div>
-
-      <footer className="footer"><span>ALT Quality Radar</span><span>Scanner {payload?.scan.scannerVersion ?? "—"} · Rules {payload?.scan.rulesVersion ?? "—"}</span></footer>
     </main>
   );
 }

@@ -100,6 +100,7 @@ async function execute(scanId: string, signal: AbortSignal) {
       scanId: scan.id,
       url: scan.normalizedUrl,
       references,
+      maxPages: scan.challengeContext ? scannerConfig.challengeMaxPages : undefined,
       signal,
       onProgress: (stage, detail, completed, total, currentUrl) => update(scan.id, stage, detail, completed, total, currentUrl),
     });
@@ -121,10 +122,14 @@ async function execute(scanId: string, signal: AbortSignal) {
     current.stageHistory.push({ stage: "COMPLETE", detail: "Scan report and release gate are ready", at: current.completedAt });
     current.progress = { stage: "COMPLETE", detail: "Scan report and release gate are ready", completedUnits: 1, totalUnits: 1, updatedAt: current.completedAt };
     await saveScan(current);
-    try {
-      current.persistence = await mirrorCompletedScan(current);
-    } catch (persistenceError) {
-      current.persistence = { backend: "supabase", synchronized: false, warning: "Supabase synchronization failed; the complete local report remains available." };
+    if (current.challengeContext) {
+      current.persistence = { backend: "local", synchronized: true };
+    } else {
+      try {
+        current.persistence = await mirrorCompletedScan(current);
+      } catch (persistenceError) {
+        current.persistence = { backend: "supabase", synchronized: false, warning: "Supabase synchronization failed; the complete local report remains available." };
+      }
     }
     await saveScan(current);
   } catch (error) {

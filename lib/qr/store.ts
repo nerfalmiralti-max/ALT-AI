@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { buildFixQueue, buildPageHealth, groupIssues } from "./analysis";
@@ -7,16 +7,38 @@ import { buildPerformanceReadings } from "./performance";
 import { scannerConfig, RULES_VERSION, SCANNER_VERSION, scanConfigSnapshot } from "./config";
 import { DEFAULT_RELEASE_GATE } from "./release";
 import { sanitizeDiagnosticText } from "./sanitize";
-import type { PageAudit, ProjectIndex, ProjectRecord, ReleaseGateConfig, ScanIssue, ScanProgress, ScanRecord } from "./types";
+import { storageCapacityReason } from "./storage-quota";
+import type { ChallengeIndex, ChallengeIndexEntry, ChallengeRecord, ChallengeRun, ExistingQaVerdict, PageAudit, ProjectIndex, ProjectRecord, ReleaseGateConfig, ScanIssue, ScanProgress, ScanRecord } from "./types";
 
 const root = path.resolve(process.cwd(), scannerConfig.dataDir);
 const scansDir = path.join(root, "scans");
 const assetsDir = path.join(root, "assets");
+const challengesDir = path.join(root, "challenges");
 const projectsFile = path.join(root, "projects.json");
+const challengesFile = path.join(root, "challenges.json");
 let projectMutation: Promise<unknown> = Promise.resolve();
+let challengeMutation: Promise<unknown> = Promise.resolve();
+
+export class StorageCapacityError extends Error {}
+
+async function boundedDirectoryBytes(directory: string, stopAfter: number): Promise<number> {
+  let total = 0;
+  try {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) total += await boundedDirectoryBytes(target, Math.max(0, stopAfter - total));
+      else if (entry.isFile()) total += (await lstat(target)).size;
+      if (total > stopAfter) return total;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  return total;
+}
 
 async function ensureStore() {
-  await Promise.all([mkdir(scansDir, { recursive: true }), mkdir(assetsDir, { recursive: true })]);
+  await Promise.all([mkdir(scansDir, { recursive: true }), mkdir(assetsDir, { recursive: true }), mkdir(challengesDir, { recursive: true })]);
 }
 
 async function readJson<T>(file: string, fallback: T): Promise<T> {
@@ -69,6 +91,36 @@ function normalizeProject(project: ProjectRecord): ProjectRecord {
     scanIds: project.scanIds ?? [],
     gateConfig: { ...DEFAULT_RELEASE_GATE, ...project.gateConfig },
     ignoredFingerprints: project.ignoredFingerprints ?? [],
+  };
+}
+
+function normalizeChallenge(challenge: ChallengeRecord): ChallengeRecord {
+  return {
+    ...challenge,
+    existingQaVerdict: challenge.existingQaVerdict ?? "UNKNOWN",
+    status: challenge.status ?? challenge.runs?.at(-1)?.progress.stage ?? "QUEUED",
+    runs: challenge.runs ?? [],
+    events: challenge.events ?? [],
+  };
+}
+
+function challengeIndexEntry(challenge: ChallengeRecord): ChallengeIndexEntry {
+  const latest = challenge.runs.at(-1);
+  return {
+    id: challenge.id,
+    projectId: challenge.projectId,
+    productionUrl: challenge.productionUrl,
+    candidateUrl: challenge.candidateUrl,
+    existingQaVerdict: challenge.existingQaVerdict,
+    createdAt: challenge.createdAt,
+    updatedAt: challenge.updatedAt,
+    latestRun: latest ? {
+      id: latest.id,
+      createdAt: latest.createdAt,
+      completedAt: latest.completedAt,
+      progress: latest.progress,
+      verdict: latest.verdict,
+    } : undefined,
   };
 }
 
@@ -161,21 +213,44 @@ async function mutateProjects<T>(mutation: (index: ProjectIndex) => Promise<T> |
   return task;
 }
 
+async function mutateChallengeStore<T>(mutation: (index: ChallengeIndex) => Promise<T>): Promise<T> {
+  const task = challengeMutation.then(async () => {
+    const index = await readJson<ChallengeIndex>(challengesFile, { challenges: [] });
+    const result = await mutation(index);
+    await atomicJson(challengesFile, index);
+    return result;
+  });
+  challengeMutation = task.then(() => undefined, () => undefined);
+  return task;
+}
+
 export async function listProjects() {
   await ensureStore();
   const index = await readJson<ProjectIndex>(projectsFile, { projects: [] });
-  return index.projects.map(normalizeProject).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return index.projects.map(normalizeProject).filter((project) => !project.hidden).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 export async function getProject(id: string) {
-  return (await listProjects()).find((project) => project.id === id) ?? null;
+  await ensureStore();
+  const index = await readJson<ProjectIndex>(projectsFile, { projects: [] });
+  const project = index.projects.find((entry) => entry.id === id);
+  return project ? normalizeProject(project) : null;
 }
 
-export async function createScan(targetUrl: string, normalizedUrl: string) {
+export async function createScan(targetUrl: string, normalizedUrl: string, challengeContext?: ScanRecord["challengeContext"]) {
   const now = new Date().toISOString();
   const origin = new URL(normalizedUrl).origin;
   const scanId = randomUUID();
-  const project = await mutateProjects((index) => {
+  const project = await mutateProjects(async (index) => {
+    const scanCount = (await readdir(scansDir).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? [] : Promise.reject(error)))
+      .filter((name) => /^[0-9a-f-]{36}\.json$/i.test(name)).length;
+    const reservationBytes = scannerConfig.maxScreenshotBytes * 6 + 5_000_000;
+    const storedBytes = await boundedDirectoryBytes(root, scannerConfig.maxStoredBytes);
+    const capacityReason = storageCapacityReason(
+      { scanCount, storedBytes },
+      { maxStoredScans: scannerConfig.maxStoredScans, maxStoredBytes: scannerConfig.maxStoredBytes, reservationBytes },
+    );
+    if (capacityReason) throw new StorageCapacityError(capacityReason);
     let current = index.projects.find((entry) => entry.origin === origin);
     if (!current) {
       current = {
@@ -187,12 +262,16 @@ export async function createScan(targetUrl: string, normalizedUrl: string) {
         scanIds: [],
         gateConfig: { ...DEFAULT_RELEASE_GATE },
         ignoredFingerprints: [],
+        hidden: Boolean(challengeContext),
       };
       index.projects.push(current);
     }
-    current.scanIds.unshift(scanId);
-    current.latestScanId = scanId;
-    current.updatedAt = now;
+    if (!challengeContext) {
+      current.hidden = false;
+      current.scanIds.unshift(scanId);
+      current.latestScanId = scanId;
+      current.updatedAt = now;
+    }
     return current;
   });
   const progress: ScanProgress = { stage: "QUEUED", detail: "Scan accepted", completedUnits: 0, totalUnits: null, updatedAt: now };
@@ -219,6 +298,7 @@ export async function createScan(targetUrl: string, normalizedUrl: string) {
     scannerVersion: SCANNER_VERSION,
     rulesVersion: RULES_VERSION,
     configSnapshot: scanConfigSnapshot(),
+    challengeContext,
   };
   await atomicJson(path.join(scansDir, `${scanId}.json`), scan);
   return scan;
@@ -307,7 +387,102 @@ export async function setIgnoredFingerprint(projectId: string, fingerprint: stri
 
 export async function recentScans(limit = 12) {
   const projects = await listProjects();
-  const ids = [...new Set(projects.flatMap((project) => project.scanIds))];
-  const scans = (await Promise.all(ids.map(getScan))).filter((scan): scan is ScanRecord => Boolean(scan));
-  return scans.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit);
+  const requested = Math.max(0, Math.min(limit, 100));
+  if (!requested) return [];
+  const heads = (await Promise.all(projects.map(async (project) => ({ project, index: 0, scan: project.scanIds[0] ? await getScan(project.scanIds[0]) : null }))))
+    .filter((entry): entry is { project: ProjectRecord; index: number; scan: ScanRecord } => Boolean(entry.scan));
+  const result: ScanRecord[] = [];
+  while (heads.length && result.length < requested) {
+    heads.sort((a, b) => b.scan.createdAt.localeCompare(a.scan.createdAt));
+    const newest = heads.shift()!;
+    result.push(newest.scan);
+    const nextIndex = newest.index + 1;
+    const nextId = newest.project.scanIds[nextIndex];
+    if (nextId) {
+      const next = await getScan(nextId);
+      if (next) heads.push({ project: newest.project, index: nextIndex, scan: next });
+    }
+  }
+  return result;
+}
+
+export async function createChallenge(input: {
+  productionUrl: string;
+  candidateUrl: string;
+  pullRequestUrl?: string;
+  qaStack?: string;
+  existingQaVerdict?: ExistingQaVerdict;
+  projectId?: string;
+}) {
+  const now = new Date().toISOString();
+  const challenge: ChallengeRecord = {
+    id: randomUUID(),
+    projectId: input.projectId,
+    productionUrl: input.productionUrl,
+    candidateUrl: input.candidateUrl,
+    pullRequestUrl: input.pullRequestUrl,
+    qaStack: input.qaStack,
+    existingQaVerdict: input.existingQaVerdict ?? "UNKNOWN",
+    status: "QUEUED",
+    createdAt: now,
+    updatedAt: now,
+    runs: [],
+    events: [],
+  };
+  return mutateChallengeStore(async (index) => {
+    await atomicJson(path.join(challengesDir, `${challenge.id}.json`), challenge);
+    index.challenges = [challengeIndexEntry(challenge), ...index.challenges.filter((entry) => entry.id !== challenge.id)];
+    return challenge;
+  });
+}
+
+export async function getChallenge(id: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const challenge = await readJson<ChallengeRecord | null>(path.join(challengesDir, `${id}.json`), null);
+  return challenge ? normalizeChallenge(challenge) : null;
+}
+
+export async function updateChallenge<T>(id: string, mutation: (challenge: ChallengeRecord) => T | Promise<T>) {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Invalid challenge ID");
+  return mutateChallengeStore(async (index) => {
+    const stored = await readJson<ChallengeRecord | null>(path.join(challengesDir, `${id}.json`), null);
+    if (!stored) throw new Error("Challenge not found");
+    const challenge = normalizeChallenge(stored);
+    const result = await mutation(challenge);
+    challenge.updatedAt = new Date().toISOString();
+    await atomicJson(path.join(challengesDir, `${id}.json`), challenge);
+    index.challenges = [challengeIndexEntry(challenge), ...index.challenges.filter((entry) => entry.id !== id)]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return result;
+  });
+}
+
+export async function saveChallenge(challenge: ChallengeRecord) {
+  await updateChallenge(challenge.id, (stored) => {
+    Object.assign(stored, challenge);
+    stored.runs = challenge.runs;
+  });
+  return challenge;
+}
+
+export async function appendChallengeRun(challengeId: string, run: ChallengeRun) {
+  return updateChallenge(challengeId, (challenge) => {
+    if (challenge.runs.some((entry) => entry.id === run.id)) throw new Error("Challenge run already exists");
+    challenge.runs.push(run);
+    challenge.activeRunId = run.id;
+    challenge.status = run.progress.stage;
+    challenge.events.push({ name: challenge.runs.length === 1 ? "challenge_started" : "challenge_rerun", at: run.createdAt, runId: run.id });
+    challenge.events = challenge.events.slice(-200);
+    return challenge;
+  });
+}
+
+export async function listChallenges(limit = 20) {
+  await ensureStore();
+  const requested = Math.max(0, Math.min(limit, 100));
+  if (!requested) return [];
+  const index = await readJson<ChallengeIndex>(challengesFile, { challenges: [] });
+  const entries = [...index.challenges].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, requested);
+  const challenges = await Promise.all(entries.map((entry) => getChallenge(entry.id)));
+  return challenges.filter((entry): entry is ChallengeRecord => Boolean(entry));
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import type { IssueCategory, ScanRecord } from "@/lib/qr/types";
@@ -10,6 +11,7 @@ import { displayHost, issueAnchorId, pathLabel, signed } from "./report-model";
 export const REPORT_LINKS = [
   ["overview", "Overview"],
   ["priority", "Fix first"],
+  ["changed", "Changes"],
   ["issues", "Issues"],
   ["pages", "Pages"],
   ["performance", "Performance"],
@@ -29,10 +31,10 @@ export function ReportNavigation() {
 
 export function ReleaseBrief({ payload }: { payload: ReportPayload }) {
   const { scan } = payload;
-  const active = scan.issues.filter((issue) => issue.lifecycle !== "IGNORED");
-  const critical = active.filter((issue) => issue.severity === "CRITICAL").length;
-  const warning = active.filter((issue) => issue.severity === "WARNING").length;
-  const notice = active.filter((issue) => issue.severity === "NOTICE").length;
+  const activeGroups = scan.issueGroups.filter((group) => group.lifecycle !== "IGNORED");
+  const critical = activeGroups.filter((group) => group.severity === "CRITICAL").length;
+  const warning = activeGroups.filter((group) => group.severity === "WARNING").length;
+  const notice = activeGroups.filter((group) => group.severity === "NOTICE").length;
   const delta = scan.comparisons.previous;
   const failedChecks = scan.releaseGate?.checks.filter((check) => !check.passed) ?? [];
   return (
@@ -40,7 +42,7 @@ export function ReleaseBrief({ payload }: { payload: ReportPayload }) {
       <div className="release-brief__title">
         <div className="status-line"><VerificationMark state={releaseState(scan)} /><span>{scan.verdict ?? "Needs attention"}</span></div>
         <p className="technical-label">{displayHost(scan.normalizedUrl)}</p>
-        <h1 id="release-heading">{scan.releaseGate?.status === "FAIL" ? `${failedChecks.length} release gate check${failedChecks.length === 1 ? "" : "s"} must be resolved before launch.` : scan.verdict === "READY TO SHIP" ? "This release is ready to ship." : "Review the warnings before launch."}</h1>
+        <h1 id="release-heading">{scan.releaseGate?.status === "FAIL" ? `${failedChecks.length} configured release-gate check${failedChecks.length === 1 ? " is" : "s are"} failing.` : scan.verdict === "READY TO SHIP" ? "This release is ready to ship." : "Review the measured warnings before launch."}</h1>
         <p>{scan.coverage.inspectedPages} pages checked in {Math.max(1, Math.round(scan.timings.totalMs / 1_000))}s. {delta ? `${delta.issues.fixedCount} fixed and ${delta.issues.newCount} new since the previous scan.` : "This is the first completed reading for this site."}</p>
       </div>
 
@@ -116,6 +118,7 @@ export function WhatChanged({ scan }: { scan: ScanRecord }) {
         <p className="comparison-id">Scan {delta.baseScanId.slice(0, 8)} → {delta.currentScanId.slice(0, 8)}</p>
         <div className="change-list">{meaningful.slice(0, 8).map((item) => { const finding = item.current ?? item.previous; return <div key={`${item.status}-${item.fingerprint}`} data-delta={item.status}><span>{item.status}</span><b>{finding?.title}</b><small>{finding ? pathLabel(finding.evidence.url) : ""}</small></div>; })}</div>
         {delta.performance.length ? <div className="performance-movement"><span>Performance movement</span>{delta.performance.map((metric) => <div key={metric.key}><b>{metric.key}</b><small>{metric.previous.toFixed(metric.key === "cls" ? 3 : 0)} → {metric.current.toFixed(metric.key === "cls" ? 3 : 0)}</small><strong data-improved={metric.improved}>{signed(metric.delta)}</strong></div>)}</div> : null}
+        <Link className="inline-action" href={`/scan/${scan.id}/compare?against=${target}`}>Open comparison workspace</Link>
       </> : <p className="empty-state">No reference scan yet. Set a baseline or run this site again to unlock comparison.</p>}
     </section>
   );

@@ -24,7 +24,7 @@ function copyInto(source: PNG, width: number, height: number) {
 }
 
 export function comparePngBuffers(baselineBuffer: Buffer, currentBuffer: Buffer): ImageDiff {
-  const maxEncodedBytes = Math.max(1_000_000, scannerConfig.maxScreenshotPixels * 4);
+  const maxEncodedBytes = scannerConfig.maxScreenshotBytes;
   if (baselineBuffer.length > maxEncodedBytes || currentBuffer.length > maxEncodedBytes) throw new Error("Screenshot exceeds the visual-comparison byte budget.");
   const declared = [pngDimensions(baselineBuffer), pngDimensions(currentBuffer)];
   if (declared.some(({ width, height }) => width <= 0 || height <= 0 || width * height > scannerConfig.maxScreenshotPixels)) throw new Error("Screenshot exceeds the visual-comparison pixel budget.");
