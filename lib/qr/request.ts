@@ -8,12 +8,14 @@ export async function readJsonBody(request: Request, maxBytes = 8_192, timeoutMs
   const decoder = new TextDecoder();
   let total = 0;
   let text = "";
-  const deadline = AbortSignal.timeout(timeoutMs);
-  const signal = AbortSignal.any([request.signal, deadline]);
+  let rejectAbort: (error: RequestBodyError) => void = () => undefined;
   const aborted = new Promise<never>((_resolve, reject) => {
-    const stop = () => reject(new RequestBodyError(deadline.aborted ? "Request body timed out." : "Request was cancelled."));
-    if (signal.aborted) stop(); else signal.addEventListener("abort", stop, { once: true });
+    rejectAbort = reject;
   });
+  const cancel = () => rejectAbort(new RequestBodyError("Request was cancelled."));
+  const deadline = setTimeout(() => rejectAbort(new RequestBodyError("Request body timed out.")), timeoutMs);
+  if (request.signal.aborted) cancel();
+  else request.signal.addEventListener("abort", cancel, { once: true });
   try {
     while (true) {
       const { done, value } = await Promise.race([reader.read(), aborted]);
@@ -24,6 +26,8 @@ export async function readJsonBody(request: Request, maxBytes = 8_192, timeoutMs
     }
     text += decoder.decode();
   } finally {
+    clearTimeout(deadline);
+    request.signal.removeEventListener("abort", cancel);
     await reader.cancel().catch(() => undefined);
   }
   try {

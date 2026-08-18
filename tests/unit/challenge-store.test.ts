@@ -11,8 +11,10 @@ describe("Challenge persistence", () => {
     const dataDir = await mkdtemp(path.join(tmpdir(), "alt-qr-challenge-store-"));
     const storeUrl = pathToFileURL(path.resolve("lib/qr/store.ts")).href;
     const script = `
-      const store = await import(${JSON.stringify(storeUrl)});
-      const swarmModule = await import(${JSON.stringify(pathToFileURL(path.resolve("lib/qr/swarm.ts")).href)});
+      const storeNamespace = await import(${JSON.stringify(storeUrl)});
+      const store = storeNamespace.default ?? storeNamespace;
+      const swarmNamespace = await import(${JSON.stringify(pathToFileURL(path.resolve("lib/qr/swarm.ts")).href)});
+      const swarmModule = swarmNamespace.default ?? swarmNamespace;
       const challenge = await store.createChallenge({
         productionUrl: "https://production.example/",
         candidateUrl: "https://candidate.example/",
