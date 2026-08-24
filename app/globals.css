@@ -256,6 +256,7 @@ code, time, output, .technical-label { font-family: var(--font-mono); font-varia
 }
 
 @media (max-width: 340px) {
+  .product-nav { gap: .125rem; }.product-nav > a { gap: .35rem; padding-inline: .25rem; }
   .report-actions { grid-template-columns: repeat(2, 1fr); }.release-brief__readings { grid-template-columns: 1fr; }.category-matrix { grid-template-columns: 1fr; }.severity-filter button { padding-inline: .55rem; }.performance-grid { grid-template-columns: 1fr; }
 }
 
